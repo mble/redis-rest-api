@@ -1,0 +1,7 @@
+To set up the default Redis user, this should be the set of ACLs:
+
+user default on allkeys #<sha256-pass> +@all -@dangerous +KEYS -@blocking -@connection +AUTH +PING +ECHO +HELLO -@pubsub +PUBLISH +PUBSUB -WATCH -UNWATCH -DISCARD
+
+For a read-only user:
+
+user read-only on allkeys #<sha256-pass> +@all -@write -SCAN -KEYS -@dangerous -@blocking -@connection +AUTH +PING +ECHO +HELLO -@pubsub +PUBLISH +PUBSUB -WATCH -UNWATCH -DISCARD

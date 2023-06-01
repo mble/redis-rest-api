@@ -1,0 +1,14 @@
+{
+  "readonly": {
+    "role": "ro",
+    "tokenSHA": "9662c5b5a6632f7a8e55dfd93a8ec5113294407c77e705277bf61270d1ab1ea6"
+  },
+  "readwrite": {
+    "role": "rw",
+    "tokenSHA": "377cc60a03d9912065461cb5e6e910dd1f266c3cb46ecd989f0c2be078d945d5"
+  },
+  "garbo": {
+    "role": "gg",
+    "tokenSHA": "foobargbazqux"
+  }
+}
