@@ -158,7 +158,7 @@ For successful commands, a JSON object with the key of `result` is returned:
 { "result": "OK" }
 ```
 
-For errprs, a JSON object with the key of `error` is returned:
+For errors, a JSON object with the key of `error` is returned:
 
 ```json
 { "error": "ERR unknown command 'FOO'" }
