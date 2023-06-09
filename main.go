@@ -19,7 +19,6 @@ import (
 )
 
 type Config struct {
-	ListenAddr    string
 	RedisAddr     string
 	RedisUser     string
 	RedisPassword string
@@ -56,19 +55,54 @@ func newRedisClient(opts *redis.Options) *redis.Client {
 	return client
 }
 
+type serverCfg struct {
+	TLSConfig         *tls.Config
+	ListenAddr        string
+	ReadTimeout       time.Duration
+	ReadHeaderTimeout time.Duration
+	IdleTimeout       time.Duration
+}
+
+func newServer(ctx context.Context, cfg serverCfg, rc *redis.Client, um UserMap, auth authFunc) *http.Server {
+	const maxBytes int64 = 1048576 // 1 MiB
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", rootHandler(ctx, rc, um, auth))
+	mux.HandleFunc("/pipeline", pipelineHandler(ctx, rc, um, auth))
+	mux.HandleFunc("/multi-exec", txHandler(ctx, rc, um, auth))
+	wrappedMux := http.MaxBytesHandler(mux, maxBytes)
+
+	server := &http.Server{
+		Addr:              cfg.ListenAddr,
+		Handler:           wrappedMux,
+		ReadTimeout:       cfg.ReadTimeout,
+		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
+		IdleTimeout:       cfg.IdleTimeout,
+		TLSConfig:         cfg.TLSConfig,
+	}
+
+	return server
+}
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	const (
-		shutdownTimeout         = 10 * time.Second
-		serverReadTimeout       = 2 * time.Second
-		serverReadHeaderTimeout = 2 * time.Second
-		serverIdleTimeout       = 2 * time.Second
+		shutdownTimeout = 10 * time.Second
+		timeout         = 2 * time.Second
 	)
 
 	cfg := &Config{}
+	srvCfg := &serverCfg{
+		ReadTimeout:       timeout,
+		ReadHeaderTimeout: timeout,
+		IdleTimeout:       timeout,
+		TLSConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		},
+	}
 
-	flag.StringVar(&cfg.ListenAddr, "listen-addr", ":8081", "address to listen on")
+	flag.StringVar(&srvCfg.ListenAddr, "listen-addr", ":8081", "address to listen on")
 	flag.StringVar(&cfg.RedisAddr, "redis-addr", "localhost:6379", "address of redis server")
 	flag.StringVar(&cfg.RedisUser, "redis-user", "default", "redis user to AUTH as")
 	flag.StringVar(&cfg.RedisPassword, "redis-password", "", "redis user password to AUTH with")
@@ -114,27 +148,10 @@ func main() {
 	ropts := newRedisOpts(cfg)
 	rc := newRedisClient(ropts)
 
-	const maxBytes int64 = 1048576 // 1 MiB
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", rootHandler(ctx, rc, um, authenticate))
-	mux.HandleFunc("/pipeline", pipelineHandler(ctx, rc, um, authenticate))
-	mux.HandleFunc("/multi-exec", txHandler(ctx, rc, um, authenticate))
-	wrappedMux := http.MaxBytesHandler(mux, maxBytes)
-
-	server := &http.Server{
-		Addr:              cfg.ListenAddr,
-		Handler:           wrappedMux,
-		ReadTimeout:       serverReadTimeout,
-		ReadHeaderTimeout: serverReadHeaderTimeout,
-		IdleTimeout:       serverIdleTimeout,
-		TLSConfig: &tls.Config{
-			MinVersion: tls.VersionTLS12,
-		},
-	}
+	srv := newServer(ctx, *srvCfg, rc, um, authenticate)
 
 	go func() {
-		if err := server.ListenAndServeTLS(cfg.TLSCertFile, cfg.TLSKeyFile); !errors.Is(err, http.ErrServerClosed) {
+		if err := srv.ListenAndServeTLS(cfg.TLSCertFile, cfg.TLSKeyFile); !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("HTTP server error: %v", err)
 			return
 		}
@@ -149,7 +166,7 @@ func main() {
 	shutdownCtx, shutdownRelease := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownRelease()
 
-	if err := server.Shutdown(shutdownCtx); err != nil {
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("HTTP shutdown error: %v", err)
 	}
 }
