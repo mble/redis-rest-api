@@ -63,12 +63,12 @@ var AllowedROCommands = map[string]int{
 	)
 
 	subcommandRegexp := regexp.MustCompile(`\|\w+`)
-	commandGroups := []string{"dangerous", "blocking", "connection", "pubsub", "write", "transaction"}
+	commandGroups := []string{"dangerous", "blocking", "connection", "pubsub", "write", "transaction", "scripting"}
 	rwCommandGroups := []string{"dangerous", "blocking", "connection", "pubsub", "transaction"}
 	additionalRestrictedCommands := []string{"watch", "unwatch", "discard"}
 	additionalRestrictedROCommands := []string{"keys", "scan"}
 	additionalAllowedRWCommands := []string{"keys", "publish"}
-	additionalAllowedCommands := []string{"ping", "echo"}
+	additionalAllowedCommands := []string{"ping", "echo", "eval_ro", "evalsha_ro", "fcall_ro"}
 	commandGroupsMap := map[string][]string{}
 	opts := &redis.Options{
 		Addr:         redisAddr,
