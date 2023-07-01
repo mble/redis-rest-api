@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"runtime"
 	"runtime/pprof"
+	"strings"
 	"syscall"
 	"time"
 
@@ -19,24 +20,48 @@ import (
 )
 
 type Config struct {
-	RedisAddr     string
-	RedisUser     string
-	RedisPassword string
-	MapFile       string
-	TLSCertFile   string
-	TLSKeyFile    string
-	CPUProfile    bool
+	RedisURI                string
+	RedisAddr               string
+	RedisUser               string
+	RedisPassword           string
+	MapFile                 string
+	TLSCertFile             string
+	TLSKeyFile              string
+	CPUProfile              bool
+	RedisInsecureSkipVerify bool
 }
 
-func newRedisOpts(cfg *Config) *redis.Options {
+func newRedisOpts(cfg *Config) (*redis.Options, error) {
 	const (
 		redisDialTimeout  = 2 * time.Second
 		redisReadTimeout  = 2 * time.Second
 		redisWriteTimeout = 2 * time.Second
 		redisDB           = 0
+		redisClientName   = "redis-rest-api"
 	)
 
-	var redisPoolSize = 20 & runtime.NumCPU()
+	var redisPoolSize = 20 * runtime.NumCPU()
+
+	if cfg.RedisURI != "" {
+		opts, err := redis.ParseURL(cfg.RedisURI)
+		if err != nil {
+			return nil, err
+		}
+
+		opts.DialTimeout = redisDialTimeout
+		opts.ReadTimeout = redisReadTimeout
+		opts.WriteTimeout = redisWriteTimeout
+		opts.ClientName = redisClientName
+		opts.PoolSize = redisPoolSize
+
+		if strings.HasPrefix(cfg.RedisURI, "rediss") && cfg.RedisInsecureSkipVerify {
+			opts.TLSConfig = &tls.Config{
+				InsecureSkipVerify: true,
+			} // #nosec G402 -- InsecureSkipVerify is required for self-signed certs
+		}
+
+		return opts, nil
+	}
 
 	return &redis.Options{
 		Addr:         cfg.RedisAddr,
@@ -47,7 +72,7 @@ func newRedisOpts(cfg *Config) *redis.Options {
 		ClientName:   "redis-rest-api",
 		PoolSize:     redisPoolSize,
 		PoolFIFO:     true,
-	}
+	}, nil
 }
 
 func newRedisClient(opts *redis.Options) *redis.Client {
@@ -103,6 +128,7 @@ func main() {
 	}
 
 	flag.StringVar(&srvCfg.ListenAddr, "listen-addr", ":8081", "address to listen on")
+	flag.StringVar(&cfg.RedisURI, "redis-uri", "", "redis URI (overrides other redis options)")
 	flag.StringVar(&cfg.RedisAddr, "redis-addr", "localhost:6379", "address of redis server")
 	flag.StringVar(&cfg.RedisUser, "redis-user", "default", "redis user to AUTH as")
 	flag.StringVar(&cfg.RedisPassword, "redis-password", "", "redis user password to AUTH with")
@@ -110,6 +136,7 @@ func main() {
 	flag.StringVar(&cfg.TLSCertFile, "tls-cert", "test-cert.pem", "TLS certificate file")
 	flag.StringVar(&cfg.TLSKeyFile, "tls-key", "test-key.pem", "TLS key file")
 	flag.BoolVar(&cfg.CPUProfile, "profile", false, "Create a CPU profile")
+	flag.BoolVar(&cfg.RedisInsecureSkipVerify, "redis-insecure-skip-verify", false, "set insecureSkipVerify for Redis connection over TLS")
 
 	showVersion := flag.Bool("version", false, "print version and exit")
 
@@ -145,7 +172,12 @@ func main() {
 		return
 	}
 
-	ropts := newRedisOpts(cfg)
+	ropts, err := newRedisOpts(cfg)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
 	rc := newRedisClient(ropts)
 
 	srv := newServer(ctx, *srvCfg, rc, um, authenticate)
