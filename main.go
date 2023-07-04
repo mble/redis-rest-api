@@ -133,8 +133,8 @@ func main() {
 	flag.StringVar(&cfg.RedisUser, "redis-user", "default", "redis user to AUTH as")
 	flag.StringVar(&cfg.RedisPassword, "redis-password", "", "redis user password to AUTH with")
 	flag.StringVar(&cfg.MapFile, "map-file", "redis-users.json", "filepath containing user map")
-	flag.StringVar(&cfg.TLSCertFile, "tls-cert", "test-cert.pem", "TLS certificate file")
-	flag.StringVar(&cfg.TLSKeyFile, "tls-key", "test-key.pem", "TLS key file")
+	flag.StringVar(&cfg.TLSCertFile, "tls-cert", "", "TLS certificate file")
+	flag.StringVar(&cfg.TLSKeyFile, "tls-key", "", "TLS key file")
 	flag.BoolVar(&cfg.CPUProfile, "profile", false, "Create a CPU profile")
 	flag.BoolVar(&cfg.RedisInsecureSkipVerify, "redis-insecure-skip-verify", false, "set insecureSkipVerify for Redis connection over TLS")
 
@@ -183,9 +183,20 @@ func main() {
 	srv := newServer(ctx, *srvCfg, rc, um, authenticate)
 
 	go func() {
-		if err := srv.ListenAndServeTLS(cfg.TLSCertFile, cfg.TLSKeyFile); !errors.Is(err, http.ErrServerClosed) {
-			log.Printf("HTTP server error: %v", err)
-			return
+		if cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
+			log.Println("Serving HTTPS on ", srv.Addr)
+
+			if err := srv.ListenAndServeTLS(cfg.TLSCertFile, cfg.TLSKeyFile); !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("TLS server error: %v", err)
+				return
+			}
+		} else {
+			log.Println("Serving HTTP on ", srv.Addr)
+
+			if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("HTTP server error: %v", err)
+				return
+			}
 		}
 
 		log.Println("Stopped serving new connections.")
