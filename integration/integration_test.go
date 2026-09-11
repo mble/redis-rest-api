@@ -287,6 +287,7 @@ func newStack(t *testing.T) (*redisdb.Client, http.Handler) {
 		MaxMonitors:      1,
 		WriteTimeout:     time.Second,
 		ReadyCacheTTL:    time.Second,
+		Metrics:          true,
 	})
 }
 

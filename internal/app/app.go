@@ -86,6 +86,7 @@ func Run(
 		MaxMonitors:      cfg.MaxMonitors,
 		WriteTimeout:     cfg.WriteTimeout,
 		ReadyCacheTTL:    cfg.ReadyCacheTTL,
+		Metrics:          cfg.Metrics,
 	})
 	server := newServer(ctx, &cfg, handler, logger)
 

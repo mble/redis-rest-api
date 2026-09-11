@@ -47,6 +47,7 @@ type Handler struct {
 	monitors      limiter
 	writeTimeout  time.Duration
 	readiness     readyCache
+	metrics       metrics
 }
 
 type Options struct {
@@ -57,6 +58,7 @@ type Options struct {
 	MaxMonitors      int
 	WriteTimeout     time.Duration
 	ReadyCacheTTL    time.Duration
+	Metrics          bool
 }
 
 func New(service Service, logger *slog.Logger, options Options) *Handler {
@@ -70,6 +72,7 @@ func New(service Service, logger *slog.Logger, options Options) *Handler {
 		monitors:      newLimiter(options.MaxMonitors),
 		writeTimeout:  options.WriteTimeout,
 		readiness:     readyCache{ttl: options.ReadyCacheTTL},
+		metrics:       metrics{enabled: options.Metrics},
 	}
 }
 
@@ -115,6 +118,28 @@ func (l limiter) release() {
 }
 
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	if request.URL.Path == "/metrics" {
+		h.metrics.write(writer, request, h)
+
+		return
+	}
+	if !h.metrics.enabled {
+		h.serve(writer, request)
+
+		return
+	}
+
+	started := time.Now()
+	tracked := &metricWriter{ResponseWriter: writer}
+	h.metrics.start()
+	defer func() {
+		h.metrics.finish(tracked.statusCode(), time.Since(started))
+	}()
+
+	h.serve(tracked, request)
+}
+
+func (h *Handler) serve(writer http.ResponseWriter, request *http.Request) {
 	if _, ok := allowedMethods[request.Method]; !ok {
 		writer.Header().Set("Allow", "GET, HEAD, POST, PUT")
 		writeError(writer, request, http.StatusMethodNotAllowed, "method not allowed")
@@ -420,6 +445,7 @@ func (h *Handler) admit(
 	if limit.acquire() {
 		return true
 	}
+	h.metrics.reject()
 
 	writeError(writer, request, http.StatusTooManyRequests, resource+" capacity exceeded")
 

@@ -384,6 +384,23 @@ func TestHealth(t *testing.T) {
 	}
 }
 
+func TestMetrics(t *testing.T) {
+	handler := newTestHandler(&fakeService{value: "OK"}, testBodyLimit)
+	request := httptest.NewRequest(http.MethodGet, "/ping", http.NoBody)
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+
+	request = httptest.NewRequest(http.MethodGet, "/metrics", http.NoBody)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected HTTP %d, got %d", http.StatusOK, response.Code)
+	}
+	if !strings.Contains(response.Body.String(), "redis_rest_http_requests_total 1") {
+		t.Fatalf("unexpected metrics: %s", response.Body.String())
+	}
+}
+
 func TestReadinessCachesRedisPing(t *testing.T) {
 	service := &fakeService{}
 	handler := newTestHandler(service, testBodyLimit)
@@ -558,5 +575,6 @@ func newTestHandler(service Service, limit int64) *Handler {
 		MaxMonitors:      testMaxMonitors,
 		WriteTimeout:     testWriteTimeout,
 		ReadyCacheTTL:    testReadyCacheTTL,
+		Metrics:          true,
 	})
 }

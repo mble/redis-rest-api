@@ -76,6 +76,7 @@ type Config struct {
 	MaxInFlight       int
 	MaxSubscriptions  int
 	MaxMonitors       int
+	Metrics           bool
 	RedisSkipVerify   bool
 	ShowVersion       bool
 }
@@ -109,6 +110,7 @@ func Parse(args []string, getenv Getter, output io.Writer) (Config, error) {
 	flags.IntVar(&config.MaxInFlight, "max-in-flight", config.MaxInFlight, "maximum concurrent command requests")
 	flags.IntVar(&config.MaxSubscriptions, "max-subscriptions", config.MaxSubscriptions, "maximum subscription streams")
 	flags.IntVar(&config.MaxMonitors, "max-monitors", config.MaxMonitors, "maximum monitor streams; zero disables")
+	flags.BoolVar(&config.Metrics, "metrics", config.Metrics, "expose Prometheus metrics at /metrics")
 	flags.BoolVar(&config.RedisSkipVerify, "redis-insecure-skip-verify", config.RedisSkipVerify, "skip Redis TLS verification")
 	flags.BoolVar(&config.ShowVersion, "version", false, "print version")
 
