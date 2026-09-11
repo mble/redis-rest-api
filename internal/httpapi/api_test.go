@@ -467,6 +467,20 @@ func TestMetrics(t *testing.T) {
 	}
 }
 
+func TestAuthMetrics(t *testing.T) {
+	handler := newTestHandler(&fakeService{err: domain.ErrUnauthorized}, testBodyLimit)
+	request := httptest.NewRequest(http.MethodGet, "/get/key", http.NoBody)
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+
+	request = httptest.NewRequest(http.MethodGet, "/metrics", http.NoBody)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if !strings.Contains(response.Body.String(), "redis_rest_auth_failures_total 1") {
+		t.Fatalf("unexpected metrics: %s", response.Body.String())
+	}
+}
+
 func TestReadinessCachesRedisPing(t *testing.T) {
 	service := &fakeService{}
 	handler := newTestHandler(service, testBodyLimit)

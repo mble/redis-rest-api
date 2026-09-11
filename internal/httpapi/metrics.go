@@ -15,6 +15,7 @@ type metrics struct {
 	requests   atomic.Uint64
 	completed  atomic.Uint64
 	rejected   atomic.Uint64
+	authFailed atomic.Uint64
 	active     atomic.Int64
 	durationNS atomic.Uint64
 	responses  [metricStatusClasses]atomic.Uint64
@@ -37,6 +38,9 @@ func (m *metrics) finish(status int, duration time.Duration) {
 		class = 0
 	}
 	m.responses[class].Add(1)
+	if status == http.StatusUnauthorized {
+		m.authFailed.Add(1)
+	}
 }
 
 func (m *metrics) reject() {
@@ -65,6 +69,7 @@ func (m *metrics) write(writer http.ResponseWriter, request *http.Request, handl
 	writeMetric(&body, "redis_rest_http_requests_active", m.active.Load())
 	writeMetric(&body, "redis_rest_http_requests_capacity", cap(handler.requests))
 	writeMetric(&body, "redis_rest_http_requests_rejected_total", m.rejected.Load())
+	writeMetric(&body, "redis_rest_auth_failures_total", m.authFailed.Load())
 	writeMetric(&body, "redis_rest_http_request_duration_seconds_sum", float64(m.durationNS.Load())/float64(time.Second))
 	writeMetric(&body, "redis_rest_http_request_duration_seconds_count", m.completed.Load())
 	writeMetric(&body, "redis_rest_subscriptions_active", len(handler.subscriptions))
