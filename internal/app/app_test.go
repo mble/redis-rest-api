@@ -1,11 +1,40 @@
 package app
 
 import (
+	"context"
+	"io"
+	"log/slog"
+	"net/http"
 	"testing"
 	"time"
 
 	"github.com/mble/redis-rest-api/internal/config"
 )
+
+const (
+	testMaxHeaderBytes = 32 << 10
+	testWriteTimeout   = 10 * time.Second
+)
+
+func TestServerBoundsWritesAndHeaders(t *testing.T) {
+	cfg := config.Config{
+		ListenAddr:        ":0",
+		ReadHeaderTimeout: time.Second,
+		ReadTimeout:       time.Second,
+		WriteTimeout:      testWriteTimeout,
+		IdleTimeout:       time.Second,
+		MaxHeaderBytes:    testMaxHeaderBytes,
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := newServer(context.Background(), &cfg, http.NotFoundHandler(), logger)
+
+	if server.WriteTimeout != testWriteTimeout {
+		t.Fatalf("expected %s write timeout, got %s", testWriteTimeout, server.WriteTimeout)
+	}
+	if server.MaxHeaderBytes != testMaxHeaderBytes {
+		t.Fatalf("expected %d header bytes, got %d", testMaxHeaderBytes, server.MaxHeaderBytes)
+	}
+}
 
 func TestRedisOptions(t *testing.T) {
 	cfg := config.Config{

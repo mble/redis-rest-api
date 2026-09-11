@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mble/redis-rest-api/internal/domain"
 )
@@ -194,6 +196,40 @@ func writeSSE(writer io.Writer, value string) error {
 	}
 
 	_, err := io.WriteString(writer, "\n")
+
+	return err
+}
+
+func openStream(writer http.ResponseWriter) error {
+	controller := http.NewResponseController(writer)
+	if err := controller.Flush(); err != nil {
+		return err
+	}
+
+	return setDeadline(controller, time.Time{})
+}
+
+func writeStream(writer http.ResponseWriter, value string, timeout time.Duration) error {
+	controller := http.NewResponseController(writer)
+	if err := setDeadline(controller, time.Now().Add(timeout)); err != nil {
+		return err
+	}
+	defer func() {
+		_ = setDeadline(controller, time.Time{})
+	}()
+
+	if err := writeSSE(writer, value); err != nil {
+		return err
+	}
+
+	return controller.Flush()
+}
+
+func setDeadline(controller *http.ResponseController, deadline time.Time) error {
+	err := controller.SetWriteDeadline(deadline)
+	if errors.Is(err, http.ErrNotSupported) {
+		return nil
+	}
 
 	return err
 }

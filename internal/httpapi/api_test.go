@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mble/redis-rest-api/internal/domain"
 )
@@ -20,6 +21,7 @@ const (
 	testMaxInFlight      = 8
 	testMaxSubscriptions = 4
 	testMaxMonitors      = 1
+	testWriteTimeout     = time.Second
 )
 
 func TestLimiterRejectsExcess(t *testing.T) {
@@ -426,6 +428,31 @@ func TestMonitorSSE(t *testing.T) {
 	}
 }
 
+func TestStreamSetsPerWriteDeadline(t *testing.T) {
+	writer := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	if err := writeStream(writer, "event", testWriteTimeout); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(writer.deadlines) != 2 {
+		t.Fatalf("expected deadline and reset, got %d updates", len(writer.deadlines))
+	}
+	if writer.deadlines[0].IsZero() || !writer.deadlines[1].IsZero() {
+		t.Fatalf("unexpected deadline updates: %v", writer.deadlines)
+	}
+}
+
+type deadlineRecorder struct {
+	*httptest.ResponseRecorder
+	deadlines []time.Time
+}
+
+func (d *deadlineRecorder) SetWriteDeadline(deadline time.Time) error {
+	d.deadlines = append(d.deadlines, deadline)
+
+	return nil
+}
+
 type fakeSubscription struct {
 	events <-chan domain.Event
 	errors <-chan error
@@ -478,6 +505,7 @@ func serveWithLimit(service Service, request *http.Request, limit int64) *httpte
 		MaxInFlight:      testMaxInFlight,
 		MaxSubscriptions: testMaxSubscriptions,
 		MaxMonitors:      testMaxMonitors,
+		WriteTimeout:     testWriteTimeout,
 	}).ServeHTTP(response, request)
 
 	return response

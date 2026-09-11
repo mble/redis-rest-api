@@ -74,6 +74,8 @@ func TestInvalidConfig(t *testing.T) {
 		{"-redis-pool-size", "4097"},
 		{"-redis-pool-size", "2", "-redis-min-idle", "3"},
 		{"-redis-pipeline-buffer-bytes", "65536"},
+		{"-write-timeout", "0s"},
+		{"-max-header-bytes", "1048577"},
 		{"-max-in-flight", "0"},
 		{"-max-subscriptions", "-1"},
 		{"-max-monitors", "65537"},

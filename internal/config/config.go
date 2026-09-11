@@ -18,14 +18,17 @@ const (
 	defaultRedisTimeout           = 2 * time.Second
 	defaultHeaderTimeout          = 5 * time.Second
 	defaultReadTimeout            = 10 * time.Second
+	defaultWriteTimeout           = 10 * time.Second
 	defaultIdleTimeout            = 60 * time.Second
 	defaultShutdownTimeout        = 10 * time.Second
+	defaultMaxHeaderBytes         = 32 << 10
 	defaultMaxInFlight            = 256
 	defaultMaxSubscriptions       = 128
 	defaultMaxMonitors            = 1
 	maxConcurrency                = 65536
 	maxPoolSize                   = 4096
 	maxRedisBuffer                = 1 << 20
+	maxHeaderBytes                = 1 << 20
 )
 
 const (
@@ -60,8 +63,10 @@ type Config struct {
 	RedisPipePool     int
 	ReadHeaderTimeout time.Duration
 	ReadTimeout       time.Duration
+	WriteTimeout      time.Duration
 	IdleTimeout       time.Duration
 	ShutdownTimeout   time.Duration
+	MaxHeaderBytes    int
 	MaxInFlight       int
 	MaxSubscriptions  int
 	MaxMonitors       int
@@ -89,8 +94,10 @@ func Parse(args []string, getenv Getter, output io.Writer) (Config, error) {
 	flags.IntVar(&config.RedisPipePool, "redis-pipeline-pool-size", config.RedisPipePool, "dedicated Redis pipeline pool size")
 	flags.DurationVar(&config.ReadHeaderTimeout, "read-header-timeout", config.ReadHeaderTimeout, "HTTP header timeout")
 	flags.DurationVar(&config.ReadTimeout, "read-timeout", config.ReadTimeout, "HTTP request read timeout")
+	flags.DurationVar(&config.WriteTimeout, "write-timeout", config.WriteTimeout, "HTTP response write timeout")
 	flags.DurationVar(&config.IdleTimeout, "idle-timeout", config.IdleTimeout, "HTTP idle timeout")
 	flags.DurationVar(&config.ShutdownTimeout, "shutdown-timeout", config.ShutdownTimeout, "graceful shutdown timeout")
+	flags.IntVar(&config.MaxHeaderBytes, "max-header-bytes", config.MaxHeaderBytes, "maximum HTTP request header size")
 	flags.IntVar(&config.MaxInFlight, "max-in-flight", config.MaxInFlight, "maximum concurrent command requests")
 	flags.IntVar(&config.MaxSubscriptions, "max-subscriptions", config.MaxSubscriptions, "maximum subscription streams")
 	flags.IntVar(&config.MaxMonitors, "max-monitors", config.MaxMonitors, "maximum monitor streams; zero disables")
@@ -134,8 +141,10 @@ func defaults(getenv Getter) Config {
 		RedisTimeout:      defaultRedisTimeout,
 		ReadHeaderTimeout: defaultHeaderTimeout,
 		ReadTimeout:       defaultReadTimeout,
+		WriteTimeout:      defaultWriteTimeout,
 		IdleTimeout:       defaultIdleTimeout,
 		ShutdownTimeout:   defaultShutdownTimeout,
+		MaxHeaderBytes:    defaultMaxHeaderBytes,
 		MaxInFlight:       defaultMaxInFlight,
 		MaxSubscriptions:  defaultMaxSubscriptions,
 		MaxMonitors:       defaultMaxMonitors,
@@ -179,8 +188,11 @@ func (c *Config) validate() error {
 		return errors.New("redis pipeline buffer and pool size must be set together")
 	}
 
-	if c.ReadHeaderTimeout <= 0 || c.ReadTimeout <= 0 || c.IdleTimeout <= 0 || c.ShutdownTimeout <= 0 {
+	if c.ReadHeaderTimeout <= 0 || c.ReadTimeout <= 0 || c.WriteTimeout <= 0 || c.IdleTimeout <= 0 || c.ShutdownTimeout <= 0 {
 		return errors.New("HTTP timeouts must be positive")
+	}
+	if c.MaxHeaderBytes < 1 || c.MaxHeaderBytes > maxHeaderBytes {
+		return fmt.Errorf("max header must be between 1 and %d bytes", maxHeaderBytes)
 	}
 	if c.MaxInFlight < 1 || c.MaxInFlight > maxConcurrency {
 		return fmt.Errorf("maximum in-flight requests must be between 1 and %d", maxConcurrency)

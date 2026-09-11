@@ -284,6 +284,7 @@ func newStack(t *testing.T) (*redisdb.Client, http.Handler) {
 		MaxInFlight:      32,
 		MaxSubscriptions: 8,
 		MaxMonitors:      1,
+		WriteTimeout:     time.Second,
 	})
 }
 

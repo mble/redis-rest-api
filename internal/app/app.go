@@ -24,7 +24,6 @@ const (
 	clientName         = "redis-rest-api"
 	poolPerProc        = 10
 	maxPoolSize        = 1024
-	maxHeaderBytes     = 1 << 20
 	startupPingTimeout = 5 * time.Second
 )
 
@@ -84,6 +83,7 @@ func Run(
 		MaxInFlight:      cfg.MaxInFlight,
 		MaxSubscriptions: cfg.MaxSubscriptions,
 		MaxMonitors:      cfg.MaxMonitors,
+		WriteTimeout:     cfg.WriteTimeout,
 	})
 	server := newServer(ctx, &cfg, handler, logger)
 
@@ -162,8 +162,9 @@ func newServer(ctx context.Context, cfg *config.Config, handler http.Handler, lo
 		Handler:           handler,
 		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
 		ReadTimeout:       cfg.ReadTimeout,
+		WriteTimeout:      cfg.WriteTimeout,
 		IdleTimeout:       cfg.IdleTimeout,
-		MaxHeaderBytes:    maxHeaderBytes,
+		MaxHeaderBytes:    cfg.MaxHeaderBytes,
 		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
 		TLSConfig: &tls.Config{
 			MinVersion: tls.VersionTLS12,

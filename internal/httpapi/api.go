@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/mble/redis-rest-api/internal/domain"
 )
@@ -42,6 +43,7 @@ type Handler struct {
 	requests      limiter
 	subscriptions limiter
 	monitors      limiter
+	writeTimeout  time.Duration
 }
 
 type Options struct {
@@ -49,6 +51,7 @@ type Options struct {
 	MaxInFlight      int
 	MaxSubscriptions int
 	MaxMonitors      int
+	WriteTimeout     time.Duration
 }
 
 func New(service Service, logger *slog.Logger, options Options) *Handler {
@@ -59,6 +62,7 @@ func New(service Service, logger *slog.Logger, options Options) *Handler {
 		requests:      newLimiter(options.MaxInFlight),
 		subscriptions: newLimiter(options.MaxSubscriptions),
 		monitors:      newLimiter(options.MaxMonitors),
+		writeTimeout:  options.WriteTimeout,
 	}
 }
 
@@ -324,15 +328,13 @@ func (h *Handler) subscribe(
 	writer.Header().Set("X-Accel-Buffering", "no")
 	writer.WriteHeader(http.StatusOK)
 
-	flusher, ok := writer.(http.Flusher)
-	if !ok {
+	if err := openStream(writer); err != nil {
 		h.logger.Error("response writer cannot flush SSE")
 
 		return
 	}
 
-	flusher.Flush()
-	h.writeEvents(writer, flusher, request, stream)
+	h.writeEvents(writer, request, stream)
 }
 
 func (h *Handler) monitor(writer http.ResponseWriter, request *http.Request) {
@@ -366,19 +368,17 @@ func (h *Handler) monitor(writer http.ResponseWriter, request *http.Request) {
 	writer.Header().Set("X-Accel-Buffering", "no")
 	writer.WriteHeader(http.StatusOK)
 
-	flusher, ok := writer.(http.Flusher)
-	if !ok {
+	if err := openStream(writer); err != nil {
 		h.logger.Error("response writer cannot flush SSE")
 
 		return
 	}
 
-	if err := writeSSE(writer, `"OK"`); err != nil {
+	if err := writeStream(writer, `"OK"`, h.writeTimeout); err != nil {
 		return
 	}
-	flusher.Flush()
 
-	h.writeMonitor(writer, flusher, request, stream)
+	h.writeMonitor(writer, request, stream)
 }
 
 func (h *Handler) admit(
@@ -398,7 +398,6 @@ func (h *Handler) admit(
 
 func (h *Handler) writeEvents(
 	writer http.ResponseWriter,
-	flusher http.Flusher,
 	request *http.Request,
 	stream domain.Subscription,
 ) {
@@ -409,10 +408,9 @@ func (h *Handler) writeEvents(
 				return
 			}
 
-			if err := writeSSE(writer, formatEvent(event)); err != nil {
+			if err := writeStream(writer, formatEvent(event), h.writeTimeout); err != nil {
 				return
 			}
-			flusher.Flush()
 		case err, ok := <-stream.Errors():
 			if ok && err != nil {
 				h.logger.Warn("subscription ended", "error", err)
@@ -427,7 +425,6 @@ func (h *Handler) writeEvents(
 
 func (h *Handler) writeMonitor(
 	writer http.ResponseWriter,
-	flusher http.Flusher,
 	request *http.Request,
 	stream domain.Monitor,
 ) {
@@ -438,10 +435,9 @@ func (h *Handler) writeMonitor(
 				return
 			}
 
-			if err := writeSSE(writer, line); err != nil {
+			if err := writeStream(writer, line, h.writeTimeout); err != nil {
 				return
 			}
-			flusher.Flush()
 		case err, ok := <-stream.Errors():
 			if ok && err != nil {
 				h.logger.Warn("monitor ended", "error", err)
