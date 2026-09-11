@@ -22,7 +22,7 @@ import (
 
 const (
 	clientName         = "redis-rest-api"
-	poolPerCPU         = 20
+	poolPerProc        = 10
 	maxPoolSize        = 1024
 	maxHeaderBytes     = 1 << 20
 	startupPingTimeout = 5 * time.Second
@@ -123,8 +123,18 @@ func redisOptions(cfg *config.Config) (*redis.Options, error) {
 	options.DialTimeout = cfg.DialTimeout
 	options.ReadTimeout = cfg.RedisTimeout
 	options.WriteTimeout = cfg.RedisTimeout
-	options.PoolFIFO = true
-	options.PoolSize = min(poolPerCPU*runtime.NumCPU(), maxPoolSize)
+	poolSize := cfg.RedisPoolSize
+	if poolSize == 0 {
+		poolSize = min(poolPerProc*runtime.GOMAXPROCS(0), maxPoolSize)
+	}
+
+	options.PoolFIFO = false
+	options.PoolSize = poolSize
+	options.MaxActiveConns = poolSize
+	options.MinIdleConns = cfg.RedisMinIdle
+	options.PipelineReadBufferSize = cfg.RedisPipeBuffer
+	options.PipelineWriteBufferSize = cfg.RedisPipeBuffer
+	options.PipelinePoolSize = cfg.RedisPipePool
 
 	if options.TLSConfig != nil {
 		options.TLSConfig.MinVersion = tls.VersionTLS12

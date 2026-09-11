@@ -20,6 +20,8 @@ const (
 	defaultReadTimeout           = 10 * time.Second
 	defaultIdleTimeout           = 60 * time.Second
 	defaultShutdownTimeout       = 10 * time.Second
+	maxPoolSize                  = 4096
+	maxRedisBuffer               = 1 << 20
 )
 
 const (
@@ -48,6 +50,10 @@ type Config struct {
 	MaxBody           int64
 	DialTimeout       time.Duration
 	RedisTimeout      time.Duration
+	RedisPoolSize     int
+	RedisMinIdle      int
+	RedisPipeBuffer   int
+	RedisPipePool     int
 	ReadHeaderTimeout time.Duration
 	ReadTimeout       time.Duration
 	IdleTimeout       time.Duration
@@ -70,6 +76,10 @@ func Parse(args []string, getenv Getter, output io.Writer) (Config, error) {
 	flags.Int64Var(&config.MaxBody, "max-body-bytes", config.MaxBody, "maximum request body")
 	flags.DurationVar(&config.DialTimeout, "redis-dial-timeout", config.DialTimeout, "Redis dial timeout")
 	flags.DurationVar(&config.RedisTimeout, "redis-timeout", config.RedisTimeout, "Redis read and write timeout")
+	flags.IntVar(&config.RedisPoolSize, "redis-pool-size", config.RedisPoolSize, "Redis connection pool size; zero selects automatically")
+	flags.IntVar(&config.RedisMinIdle, "redis-min-idle", config.RedisMinIdle, "minimum idle Redis connections")
+	flags.IntVar(&config.RedisPipeBuffer, "redis-pipeline-buffer-bytes", config.RedisPipeBuffer, "dedicated Redis pipeline buffer; zero disables")
+	flags.IntVar(&config.RedisPipePool, "redis-pipeline-pool-size", config.RedisPipePool, "dedicated Redis pipeline pool size")
 	flags.DurationVar(&config.ReadHeaderTimeout, "read-header-timeout", config.ReadHeaderTimeout, "HTTP header timeout")
 	flags.DurationVar(&config.ReadTimeout, "read-timeout", config.ReadTimeout, "HTTP request read timeout")
 	flags.DurationVar(&config.IdleTimeout, "idle-timeout", config.IdleTimeout, "HTTP idle timeout")
@@ -139,6 +149,21 @@ func (c *Config) validate() error {
 
 	if c.DialTimeout <= 0 || c.RedisTimeout <= 0 {
 		return errors.New("redis timeouts must be positive")
+	}
+	if c.RedisPoolSize < 0 || c.RedisPoolSize > maxPoolSize {
+		return fmt.Errorf("redis pool size must be between 0 and %d", maxPoolSize)
+	}
+	if c.RedisMinIdle < 0 || c.RedisPipePool < 0 {
+		return errors.New("redis pool counts cannot be negative")
+	}
+	if c.RedisPoolSize > 0 && c.RedisMinIdle > c.RedisPoolSize {
+		return errors.New("redis minimum idle connections exceed pool size")
+	}
+	if c.RedisPipeBuffer < 0 || c.RedisPipeBuffer > maxRedisBuffer {
+		return fmt.Errorf("redis pipeline buffer must be between 0 and %d bytes", maxRedisBuffer)
+	}
+	if (c.RedisPipeBuffer == 0) != (c.RedisPipePool == 0) {
+		return errors.New("redis pipeline buffer and pool size must be set together")
 	}
 
 	if c.ReadHeaderTimeout <= 0 || c.ReadTimeout <= 0 || c.IdleTimeout <= 0 || c.ShutdownTimeout <= 0 {

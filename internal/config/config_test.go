@@ -71,6 +71,9 @@ func TestInvalidConfig(t *testing.T) {
 		{"-tls-cert", "cert.pem"},
 		{"-max-body-bytes", "0"},
 		{"-redis-timeout", "0s"},
+		{"-redis-pool-size", "4097"},
+		{"-redis-pool-size", "2", "-redis-min-idle", "3"},
+		{"-redis-pipeline-buffer-bytes", "65536"},
 		{"-log-level", "trace"},
 		{"positional"},
 	}
