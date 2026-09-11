@@ -32,9 +32,9 @@ func TestRawTokens(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		role, ok := store.Verify(test.token)
-		if ok != test.ok || (ok && role != test.role) {
-			t.Fatalf("token %q: expected (%d, %t), got (%d, %t)", test.token, test.role, test.ok, role, ok)
+		principal, ok := store.Verify(test.token)
+		if ok != test.ok || (ok && principal.Role != test.role) {
+			t.Fatalf("token %q: expected (%d, %t), got (%#v, %t)", test.token, test.role, test.ok, principal, ok)
 		}
 	}
 }
@@ -52,9 +52,9 @@ func TestTokenFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	role, ok := store.Verify("secret")
-	if !ok || role != domain.RoleReadWrite {
-		t.Fatalf("expected write token, got (%d, %t)", role, ok)
+	principal, ok := store.Verify("secret")
+	if !ok || principal.Role != domain.RoleReadWrite || principal.ID != "standard" {
+		t.Fatalf("unexpected principal: (%#v, %t)", principal, ok)
 	}
 }
 

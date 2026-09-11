@@ -15,6 +15,8 @@ const (
 	sha256HexLen      = sha256.Size * 2
 	defaultTokenKinds = 2
 	maxTokenBytes     = 4096
+	standardID        = "standard"
+	readOnlyID        = "readonly"
 )
 
 type diskEntry struct {
@@ -23,12 +25,12 @@ type diskEntry struct {
 }
 
 type entry struct {
-	role domain.Role
-	hash [sha256.Size]byte
+	principal domain.Principal
+	hash      [sha256.Size]byte
 }
 
 type Store struct {
-	roles map[[sha256.Size]byte]domain.Role
+	principals map[[sha256.Size]byte]domain.Principal
 }
 
 func Load(path, standard, readOnly string) (*Store, error) {
@@ -48,7 +50,7 @@ func Load(path, standard, readOnly string) (*Store, error) {
 			return nil, fmt.Errorf("standard token: %w", err)
 		}
 
-		entries = append(entries, makeEntry(domain.RoleReadWrite, standard))
+		entries = append(entries, makeEntry(standardID, domain.RoleReadWrite, standard))
 	}
 
 	if readOnly != "" {
@@ -56,34 +58,34 @@ func Load(path, standard, readOnly string) (*Store, error) {
 			return nil, fmt.Errorf("read-only token: %w", err)
 		}
 
-		entries = append(entries, makeEntry(domain.RoleReadOnly, readOnly))
+		entries = append(entries, makeEntry(readOnlyID, domain.RoleReadOnly, readOnly))
 	}
 
 	if len(entries) == 0 {
 		return nil, errors.New("no REST tokens configured")
 	}
 
-	roles := make(map[[sha256.Size]byte]domain.Role, len(entries))
+	principals := make(map[[sha256.Size]byte]domain.Principal, len(entries))
 	for _, candidate := range entries {
-		if _, exists := roles[candidate.hash]; exists {
+		if _, exists := principals[candidate.hash]; exists {
 			return nil, errors.New("duplicate REST token")
 		}
 
-		roles[candidate.hash] = candidate.role
+		principals[candidate.hash] = candidate.principal
 	}
 
-	return &Store{roles: roles}, nil
+	return &Store{principals: principals}, nil
 }
 
-func (s *Store) Verify(raw string) (domain.Role, bool) {
+func (s *Store) Verify(raw string) (domain.Principal, bool) {
 	if len(raw) > maxTokenBytes {
-		return 0, false
+		return domain.Principal{}, false
 	}
 
 	hash := sha256.Sum256([]byte(raw))
-	role, found := s.roles[hash]
+	principal, found := s.principals[hash]
 
-	return role, found
+	return principal, found
 }
 
 func validateRaw(raw string) error {
@@ -107,7 +109,7 @@ func loadFile(path string) ([]entry, error) {
 
 	entries := make([]entry, 0, len(disk))
 	for name, value := range disk {
-		parsed, err := parseEntry(value)
+		parsed, err := parseEntry(name, value)
 		if err != nil {
 			return nil, fmt.Errorf("token %q: %w", name, err)
 		}
@@ -118,7 +120,7 @@ func loadFile(path string) ([]entry, error) {
 	return entries, nil
 }
 
-func parseEntry(value diskEntry) (entry, error) {
+func parseEntry(id string, value diskEntry) (entry, error) {
 	role, err := parseRole(value.Role)
 	if err != nil {
 		return entry{}, err
@@ -133,7 +135,7 @@ func parseEntry(value diskEntry) (entry, error) {
 		return entry{}, errors.New("tokenSHA must be hexadecimal")
 	}
 
-	parsed := entry{role: role}
+	parsed := entry{principal: domain.Principal{ID: id, Role: role}}
 	copy(parsed.hash[:], decoded)
 
 	return parsed, nil
@@ -150,9 +152,9 @@ func parseRole(raw string) (domain.Role, error) {
 	}
 }
 
-func makeEntry(role domain.Role, raw string) entry {
+func makeEntry(id string, role domain.Role, raw string) entry {
 	return entry{
-		role: role,
-		hash: sha256.Sum256([]byte(raw)),
+		principal: domain.Principal{ID: id, Role: role},
+		hash:      sha256.Sum256([]byte(raw)),
 	}
 }

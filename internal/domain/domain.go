@@ -18,6 +18,11 @@ const (
 	RoleReadOnly
 )
 
+type Principal struct {
+	ID   string
+	Role Role
+}
+
 type BatchMode uint8
 
 const (

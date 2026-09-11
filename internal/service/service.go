@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/mble/redis-rest-api/internal/domain"
-	"github.com/mble/redis-rest-api/internal/token"
 )
 
 const (
@@ -88,14 +87,18 @@ var unsafeServer = map[string]struct{}{
 
 type Service struct {
 	store   domain.Store
-	tokens  *token.Store
+	auth    authenticator
 	catalog map[string]domain.CommandInfo
 }
 
-func New(store domain.Store, tokens *token.Store, catalog map[string]domain.CommandInfo) *Service {
+type authenticator interface {
+	Verify(string) (domain.Principal, bool)
+}
+
+func New(store domain.Store, auth authenticator, catalog map[string]domain.CommandInfo) *Service {
 	return &Service{
 		store:   store,
-		tokens:  tokens,
+		auth:    auth,
 		catalog: catalog,
 	}
 }
@@ -298,12 +301,12 @@ func (s *Service) transaction(
 }
 
 func (s *Service) role(rawToken string) (domain.Role, error) {
-	role, ok := s.tokens.Verify(rawToken)
+	principal, ok := s.auth.Verify(rawToken)
 	if !ok {
 		return 0, domain.ErrUnauthorized
 	}
 
-	return role, nil
+	return principal.Role, nil
 }
 
 func (s *Service) allow(role domain.Role, cmd domain.Command) error {
