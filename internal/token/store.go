@@ -20,7 +20,7 @@ const (
 	defaultTokenKinds = 2
 	minRawTokenBytes  = 32
 	maxTokenBytes     = 4096
-	maxTokenFileBytes = 1 << 20
+	maxTokenFileBytes = 2 << 20
 	maxTokenEntries   = 10_000
 	maxTokenIDBytes   = 128
 	standardID        = "standard"

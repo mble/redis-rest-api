@@ -15,7 +15,7 @@ import (
 
 const (
 	testMaxTokenBytes     = 4096
-	testMaxTokenFileBytes = 1 << 20
+	testMaxTokenFileBytes = 2 << 20
 	testMinRawTokenBytes  = 32
 	testWriteToken        = "0123456789abcdef0123456789abcdef"
 	testReadToken         = "fedcba9876543210fedcba9876543210"
