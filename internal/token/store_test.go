@@ -1,6 +1,7 @@
 package token
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -12,7 +13,10 @@ import (
 	"github.com/mble/redis-rest-api/internal/domain"
 )
 
-const testMaxTokenBytes = 4096
+const (
+	testMaxTokenBytes     = 4096
+	testMaxTokenFileBytes = 1 << 20
+)
 
 func TestRawTokens(t *testing.T) {
 	store, err := Load("", "write", "read")
@@ -59,10 +63,14 @@ func TestTokenFile(t *testing.T) {
 }
 
 func TestInvalidTokenFile(t *testing.T) {
+	hash := sha256.Sum256([]byte("secret"))
+	encoded := hex.EncodeToString(hash[:])
 	tests := []string{
 		`{"user":{"role":"admin","tokenSHA":"00"}}`,
 		`{"user":{"role":"rw","tokenSHA":"00"}}`,
 		`{"user":{"role":"rw","tokenSHA":"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"}}`,
+		`{"":{"role":"rw","tokenSHA":"` + encoded + `"}}`,
+		`{"user":{"role":"rw","tokenSHA":"` + encoded + `","extra":true}}`,
 	}
 
 	for _, body := range tests {
@@ -74,6 +82,52 @@ func TestInvalidTokenFile(t *testing.T) {
 		if _, err := Load(path, "", ""); err == nil {
 			t.Fatalf("expected %s to fail", body)
 		}
+	}
+}
+
+func TestRejectsOversizedTokenFile(t *testing.T) {
+	hash := sha256.Sum256([]byte("secret"))
+	body := []byte(`{"user":{"role":"rw","tokenSHA":"` + hex.EncodeToString(hash[:]) + `"}}`)
+	body = append(body, bytes.Repeat([]byte(" "), testMaxTokenFileBytes+1)...)
+	path := filepath.Join(t.TempDir(), "tokens.json")
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Load(path, "", ""); err == nil {
+		t.Fatal("expected oversized token file error")
+	}
+}
+
+func TestReload(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tokens.json")
+	writeTokenFile(t, path, "before")
+
+	store, err := Load(path, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeTokenFile(t, path, "after")
+	if err := store.Reload(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := store.Verify("before"); ok {
+		t.Fatal("expected old token rejection")
+	}
+	if _, ok := store.Verify("after"); !ok {
+		t.Fatal("expected new token acceptance")
+	}
+
+	if err := os.WriteFile(path, []byte("invalid"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Reload(); err == nil {
+		t.Fatal("expected reload error")
+	}
+	if _, ok := store.Verify("after"); !ok {
+		t.Fatal("expected failed reload to retain tokens")
 	}
 }
 
@@ -135,4 +189,14 @@ func benchmarkStore(b *testing.B, size int) *Store {
 	}
 
 	return store
+}
+
+func writeTokenFile(t *testing.T, path, token string) {
+	t.Helper()
+
+	hash := sha256.Sum256([]byte(token))
+	body := []byte(`{"user":{"role":"rw","tokenSHA":"` + hex.EncodeToString(hash[:]) + `"}}`)
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
 }

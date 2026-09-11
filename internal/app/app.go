@@ -9,7 +9,10 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"os/signal"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/mble/redis-rest-api/internal/config"
@@ -30,6 +33,10 @@ const (
 type Build struct {
 	Version string
 	Commit  string
+}
+
+type reloader interface {
+	Reload() error
 }
 
 func Run(
@@ -56,6 +63,13 @@ func Run(
 	if err != nil {
 		return err
 	}
+	reloadCtx, stopReload := context.WithCancel(ctx)
+	defer stopReload()
+
+	reloadSignals := make(chan os.Signal, 1)
+	signal.Notify(reloadSignals, syscall.SIGHUP)
+	defer signal.Stop(reloadSignals)
+	go reloadTokens(reloadCtx, logger, tokens, reloadSignals)
 
 	redisOptions, err := redisOptions(&cfg)
 	if err != nil {
@@ -118,6 +132,22 @@ func Run(
 	logger.Info("server stopped")
 
 	return nil
+}
+
+func reloadTokens(ctx context.Context, logger *slog.Logger, store reloader, signals <-chan os.Signal) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-signals:
+			if err := store.Reload(); err != nil {
+				logger.Error("reload REST tokens", "error", err)
+				continue
+			}
+
+			logger.Info("REST tokens reloaded")
+		}
+	}
 }
 
 func redisOptions(cfg *config.Config) (*redis.Options, error) {

@@ -5,11 +5,22 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/mble/redis-rest-api/internal/config"
 )
+
+type reloadStub struct {
+	calls chan struct{}
+}
+
+func (s *reloadStub) Reload() error {
+	s.calls <- struct{}{}
+
+	return nil
+}
 
 const (
 	testMaxHeaderBytes = 32 << 10
@@ -112,5 +123,22 @@ func TestRedisAutoPoolRejectsExcessIdle(t *testing.T) {
 
 	if _, err := redisOptions(&cfg); err == nil {
 		t.Fatal("expected minimum idle validation error")
+	}
+}
+
+func TestReloadTokens(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	store := &reloadStub{calls: make(chan struct{}, 1)}
+	signals := make(chan os.Signal, 1)
+	go reloadTokens(ctx, logger, store, signals)
+
+	signals <- os.Interrupt
+	select {
+	case <-store.calls:
+	case <-time.After(time.Second):
+		t.Fatal("token reload timed out")
 	}
 }
