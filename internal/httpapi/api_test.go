@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -356,6 +358,39 @@ func TestRESP2ResponseLimit(t *testing.T) {
 
 	if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), "exceeds") {
 		t.Fatalf("expected response limit error, got HTTP %d with %s", response.Code, response.Body.String())
+	}
+}
+
+func TestBoundJSONMatchesEncoder(t *testing.T) {
+	values := []any{
+		resultResponse{Result: nil},
+		resultResponse{Result: "\x00\n<>énez\u2028"},
+		resultResponse{Result: string([]byte{0xff, 0xfe})},
+		resultResponse{Result: int64(-9223372036854775807)},
+		resultResponse{Result: uint64(18446744073709551615)},
+		resultResponse{Result: 1e-9},
+		[]any{
+			resultResponse{Result: []any{"value", int64(1), true}},
+			errorResponse{Error: "failed"},
+		},
+		resultResponse{Result: map[string]any{"key": "value"}},
+	}
+
+	for _, value := range values {
+		body, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := marshalBoundJSON(value, int64(len(body)))
+		if err != nil {
+			t.Fatalf("encode %#v: %v", value, err)
+		}
+		if !bytes.Equal(encoded, body) {
+			t.Fatalf("expected %q, got %q", body, encoded)
+		}
+		if _, err := marshalBoundJSON(value, int64(len(body)-1)); !errors.Is(err, errResponseLimit) {
+			t.Fatalf("expected limit error for %#v, got %v", value, err)
+		}
 	}
 }
 

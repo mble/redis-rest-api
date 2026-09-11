@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/mble/redis-rest-api/internal/domain"
 )
@@ -49,6 +51,12 @@ const (
 	maxResponseDepth    = 128
 	encodedNumberBytes  = 32
 	respErrorFrameBytes = len("-\r\n")
+	defaultJSONCapacity = 256
+)
+
+const (
+	jsonResultPrefix = `{"result":`
+	jsonErrorPrefix  = `{"error":`
 )
 
 var errResponseLimit = errors.New("response exceeds maximum size")
@@ -234,6 +242,298 @@ func writeJSON(writer http.ResponseWriter, request *http.Request, status int, va
 	writeBody(writer, request, status, "application/json", body)
 }
 
+type jsonBuffer struct {
+	body   []byte
+	budget responseBudget
+}
+
+func marshalBoundJSON(value any, limit int64) ([]byte, error) {
+	buffer := jsonBuffer{
+		body:   make([]byte, 0, min(int(limit), defaultJSONCapacity)),
+		budget: responseBudget{remaining: limit},
+	}
+	if err := appendJSONValue(value, &buffer, 0); err != nil {
+		return nil, err
+	}
+
+	return buffer.body, nil
+}
+
+func (b *jsonBuffer) write(value string) error {
+	if err := b.budget.use(len(value)); err != nil {
+		return err
+	}
+
+	b.body = append(b.body, value...)
+
+	return nil
+}
+
+func (b *jsonBuffer) writeByte(value byte) error {
+	if err := b.budget.use(1); err != nil {
+		return err
+	}
+
+	b.body = append(b.body, value)
+
+	return nil
+}
+
+func appendJSONValue(value any, buffer *jsonBuffer, depth int) error {
+	if depth > maxResponseDepth {
+		return errors.New("redis response nesting is too deep")
+	}
+
+	switch typed := value.(type) {
+	case nil:
+		return buffer.write("null")
+	case string:
+		return appendJSONString(typed, buffer)
+	case int, int8, int16, int32, int64:
+		return buffer.write(formatInt(typed))
+	case uint, uint8, uint16, uint32, uint64:
+		return buffer.write(formatUint(typed))
+	case float32, float64:
+		return appendJSONFloat(typed, buffer)
+	case bool:
+		return buffer.write(strconv.FormatBool(typed))
+	case resultResponse:
+		return appendJSONObject(jsonResultPrefix, typed.Result, buffer, depth)
+	case errorResponse:
+		return appendJSONObject(jsonErrorPrefix, typed.Error, buffer, depth)
+	case []any:
+		return appendJSONArray(typed, buffer, depth)
+	case []string:
+		return appendJSONStrings(typed, buffer, depth)
+	case map[string]any:
+		return appendJSONMap(typed, buffer, depth)
+	default:
+		return fmt.Errorf("unsupported JSON response type %T", value)
+	}
+}
+
+func appendJSONObject(
+	prefix string,
+	value any,
+	buffer *jsonBuffer,
+	depth int,
+) error {
+	if err := buffer.write(prefix); err != nil {
+		return err
+	}
+	if err := appendJSONValue(value, buffer, depth+1); err != nil {
+		return err
+	}
+
+	return buffer.write("}")
+}
+
+func appendJSONArray(values []any, buffer *jsonBuffer, depth int) error {
+	if err := buffer.write("["); err != nil {
+		return err
+	}
+
+	for index, value := range values {
+		if index > 0 {
+			if err := buffer.write(","); err != nil {
+				return err
+			}
+		}
+		if err := appendJSONValue(value, buffer, depth+1); err != nil {
+			return err
+		}
+	}
+
+	return buffer.write("]")
+}
+
+func appendJSONStrings(values []string, buffer *jsonBuffer, depth int) error {
+	if err := buffer.write("["); err != nil {
+		return err
+	}
+
+	for index, value := range values {
+		if index > 0 {
+			if err := buffer.write(","); err != nil {
+				return err
+			}
+		}
+		if err := appendJSONValue(value, buffer, depth+1); err != nil {
+			return err
+		}
+	}
+
+	return buffer.write("]")
+}
+
+func appendJSONMap(values map[string]any, buffer *jsonBuffer, depth int) error {
+	if err := buffer.write("{"); err != nil {
+		return err
+	}
+
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for index, key := range keys {
+		if index > 0 {
+			if err := buffer.write(","); err != nil {
+				return err
+			}
+		}
+		if err := appendJSONString(key, buffer); err != nil {
+			return err
+		}
+		if err := buffer.write(":"); err != nil {
+			return err
+		}
+		if err := appendJSONValue(values[key], buffer, depth+1); err != nil {
+			return err
+		}
+	}
+
+	return buffer.write("}")
+}
+
+func appendJSONString(value string, buffer *jsonBuffer) error {
+	if err := buffer.write("\""); err != nil {
+		return err
+	}
+
+	for index := 0; index < len(value); {
+		char := value[index]
+		if char < utf8.RuneSelf {
+			start := index
+			for index < len(value) && jsonASCIISafe(value[index]) {
+				index++
+			}
+			if index > start {
+				if err := buffer.write(value[start:index]); err != nil {
+					return err
+				}
+
+				continue
+			}
+
+			if err := appendJSONASCII(char, buffer); err != nil {
+				return err
+			}
+
+			index++
+			continue
+		}
+
+		runeValue, decodedSize := utf8.DecodeRuneInString(value[index:])
+		if runeValue == utf8.RuneError && decodedSize == 1 {
+			if err := buffer.write("\ufffd"); err != nil {
+				return err
+			}
+
+			index++
+			continue
+		}
+
+		if runeValue == '\u2028' || runeValue == '\u2029' {
+			escape := "\\u2028"
+			if runeValue == '\u2029' {
+				escape = "\\u2029"
+			}
+			if err := buffer.write(escape); err != nil {
+				return err
+			}
+		} else if err := buffer.write(value[index : index+decodedSize]); err != nil {
+			return err
+		}
+
+		index += decodedSize
+	}
+
+	return buffer.write("\"")
+}
+
+func jsonASCIISafe(char byte) bool {
+	return char >= 0x20 && char < utf8.RuneSelf &&
+		char != '\\' && char != '"' && char != '<' && char != '>' && char != '&'
+}
+
+func appendJSONASCII(char byte, buffer *jsonBuffer) error {
+	if jsonASCIISafe(char) {
+		return buffer.writeByte(char)
+	}
+
+	switch char {
+	case '\\':
+		return buffer.write(`\\`)
+	case '"':
+		return buffer.write(`\"`)
+	case '\n':
+		return buffer.write(`\n`)
+	case '\r':
+		return buffer.write(`\r`)
+	case '\t':
+		return buffer.write(`\t`)
+	case '\b':
+		return buffer.write(`\b`)
+	case '\f':
+		return buffer.write(`\f`)
+	default:
+		const hex = "0123456789abcdef"
+		if err := buffer.write(`\u00`); err != nil {
+			return err
+		}
+		if err := buffer.writeByte(hex[char>>4]); err != nil {
+			return err
+		}
+
+		return buffer.writeByte(hex[char&0x0f])
+	}
+}
+
+func formatInt(value any) string {
+	switch typed := value.(type) {
+	case int:
+		return strconv.FormatInt(int64(typed), 10)
+	case int8:
+		return strconv.FormatInt(int64(typed), 10)
+	case int16:
+		return strconv.FormatInt(int64(typed), 10)
+	case int32:
+		return strconv.FormatInt(int64(typed), 10)
+	case int64:
+		return strconv.FormatInt(typed, 10)
+	default:
+		return ""
+	}
+}
+
+func formatUint(value any) string {
+	switch typed := value.(type) {
+	case uint:
+		return strconv.FormatUint(uint64(typed), 10)
+	case uint8:
+		return strconv.FormatUint(uint64(typed), 10)
+	case uint16:
+		return strconv.FormatUint(uint64(typed), 10)
+	case uint32:
+		return strconv.FormatUint(uint64(typed), 10)
+	case uint64:
+		return strconv.FormatUint(typed, 10)
+	default:
+		return ""
+	}
+}
+
+func appendJSONFloat(value any, buffer *jsonBuffer) error {
+	body, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("encode Redis number: %w", err)
+	}
+
+	return buffer.write(string(body))
+}
+
 func writeBoundJSON(
 	writer http.ResponseWriter,
 	request *http.Request,
@@ -241,14 +541,9 @@ func writeBoundJSON(
 	value any,
 	limit int64,
 ) {
-	body, err := json.Marshal(value)
+	body, err := marshalBoundJSON(value, limit)
 	if err != nil {
-		writeError(writer, request, http.StatusInternalServerError, "encode response")
-
-		return
-	}
-	if int64(len(body)) > limit {
-		writeError(writer, request, http.StatusBadGateway, errResponseLimit.Error())
+		writeEncodeError(writer, request, err)
 
 		return
 	}
