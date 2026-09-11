@@ -21,6 +21,9 @@ func TestDefaults(t *testing.T) {
 	if config.TokenFile != defaultTokenFile {
 		t.Fatalf("expected %q, got %q", defaultTokenFile, config.TokenFile)
 	}
+	if config.AllowQueryToken {
+		t.Fatal("expected query tokens to be disabled")
+	}
 }
 
 func TestEnvironment(t *testing.T) {
@@ -29,6 +32,7 @@ func TestEnvironment(t *testing.T) {
 		envRedisURI:   "rediss://redis.example:6380",
 		envStandard:   "secret",
 		envLogLevel:   "debug",
+		envQueryToken: "true",
 	}
 	getenv := func(key string) string {
 		return values[key]
@@ -44,6 +48,9 @@ func TestEnvironment(t *testing.T) {
 	}
 	if config.TokenFile != "" || config.StandardToken != "secret" {
 		t.Fatalf("unexpected token config: %#v", config)
+	}
+	if !config.AllowQueryToken {
+		t.Fatal("expected query tokens to be enabled")
 	}
 }
 

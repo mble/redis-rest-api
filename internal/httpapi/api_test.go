@@ -125,7 +125,8 @@ func (f *fakeService) Monitor(_ context.Context, token string) (domain.Monitor, 
 
 func TestPathCommand(t *testing.T) {
 	service := &fakeService{value: "OK"}
-	request := httptest.NewRequest(http.MethodGet, "/set/a%2Fb/value?_token=secret", http.NoBody)
+	request := httptest.NewRequest(http.MethodGet, "/set/a%2Fb/value", http.NoBody)
+	request.Header.Set("Authorization", "Bearer secret")
 	response := serve(service, request)
 
 	if response.Code != http.StatusOK {
@@ -161,9 +162,10 @@ func TestPostBodyValue(t *testing.T) {
 	service := &fakeService{value: "OK"}
 	request := httptest.NewRequest(
 		http.MethodPost,
-		"/set/key?EX=60&NX&_token=secret",
+		"/set/key?EX=60&NX",
 		strings.NewReader("value"),
 	)
+	request.Header.Set("Authorization", "Bearer secret")
 	response := serve(service, request)
 
 	if response.Code != http.StatusOK {
@@ -173,6 +175,32 @@ func TestPostBodyValue(t *testing.T) {
 	want := domain.Command{"set", "key", []byte("value"), "EX", "60", "NX"}
 	if !reflect.DeepEqual(service.command, want) {
 		t.Fatalf("expected %#v, got %#v", want, service.command)
+	}
+}
+
+func TestQueryTokenDisabled(t *testing.T) {
+	service := &fakeService{value: "value"}
+	request := httptest.NewRequest(http.MethodGet, "/get/key?_token=query", http.NoBody)
+	serve(service, request)
+
+	if service.token != "" {
+		t.Fatalf("expected query token rejection, got %q", service.token)
+	}
+}
+
+func TestQueryTokenEnabled(t *testing.T) {
+	service := &fakeService{value: "value"}
+	request := httptest.NewRequest(http.MethodGet, "/get/key?_token=query", http.NoBody)
+	response := httptest.NewRecorder()
+	options := testOptions(testBodyLimit)
+	options.AllowQueryToken = true
+	New(service, testLogger(), options).ServeHTTP(response, request)
+
+	if service.token != "query" {
+		t.Fatalf("expected query token, got %q", service.token)
+	}
+	if response.Header().Get("Cache-Control") != cachePrivateNoStore {
+		t.Fatalf("unexpected cache control: %q", response.Header().Get("Cache-Control"))
 	}
 }
 
@@ -402,6 +430,9 @@ func TestAuthenticationError(t *testing.T) {
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("expected HTTP %d, got %d", http.StatusUnauthorized, response.Code)
 	}
+	if response.Header().Get("WWW-Authenticate") != `Bearer realm="redis-rest-api"` {
+		t.Fatalf("unexpected authentication challenge: %q", response.Header().Get("WWW-Authenticate"))
+	}
 }
 
 func TestHealth(t *testing.T) {
@@ -600,9 +631,11 @@ func serveWithLimit(service Service, request *http.Request, limit int64) *httpte
 }
 
 func newTestHandler(service Service, limit int64) *Handler {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	return New(service, testLogger(), testOptions(limit))
+}
 
-	return New(service, logger, Options{
+func testOptions(limit int64) Options {
+	return Options{
 		MaxBody:          limit,
 		MaxResponse:      testResponseLimit,
 		MaxInFlight:      testMaxInFlight,
@@ -611,5 +644,9 @@ func newTestHandler(service Service, limit int64) *Handler {
 		WriteTimeout:     testWriteTimeout,
 		ReadyCacheTTL:    testReadyCacheTTL,
 		Metrics:          true,
-	})
+	}
+}
+
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }

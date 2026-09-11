@@ -45,6 +45,7 @@ const (
 	envTLSKey     = "REDIS_REST_TLS_KEY"
 	envLogLevel   = "REDIS_REST_LOG_LEVEL"
 	envSkipVerify = "REDIS_REST_REDIS_INSECURE_SKIP_VERIFY"
+	envQueryToken = "REDIS_REST_ALLOW_QUERY_TOKEN"
 )
 
 type Getter func(string) string
@@ -78,6 +79,7 @@ type Config struct {
 	MaxMonitors       int
 	Metrics           bool
 	RedisSkipVerify   bool
+	AllowQueryToken   bool
 	ShowVersion       bool
 }
 
@@ -112,6 +114,7 @@ func Parse(args []string, getenv Getter, output io.Writer) (Config, error) {
 	flags.IntVar(&config.MaxMonitors, "max-monitors", config.MaxMonitors, "maximum monitor streams; zero disables")
 	flags.BoolVar(&config.Metrics, "metrics", config.Metrics, "expose Prometheus metrics at /metrics")
 	flags.BoolVar(&config.RedisSkipVerify, "redis-insecure-skip-verify", config.RedisSkipVerify, "skip Redis TLS verification")
+	flags.BoolVar(&config.AllowQueryToken, "allow-query-token", config.AllowQueryToken, "accept REST tokens in URL queries")
 	flags.BoolVar(&config.ShowVersion, "version", false, "print version")
 
 	if err := flags.Parse(args); err != nil {
@@ -161,6 +164,7 @@ func defaults(getenv Getter) Config {
 		MaxSubscriptions:  defaultMaxSubscriptions,
 		MaxMonitors:       defaultMaxMonitors,
 		RedisSkipVerify:   envBool(getenv(envSkipVerify)),
+		AllowQueryToken:   envBool(getenv(envQueryToken)),
 	}
 }
 

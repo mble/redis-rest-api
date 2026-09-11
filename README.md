@@ -57,7 +57,8 @@ POST /multi-exec
 [["SET", "foo", "bar"], ["GET", "foo"]]
 ```
 
-Authentication accepts `Authorization: Bearer TOKEN` or `_token=TOKEN`.
+Authentication uses `Authorization: Bearer TOKEN`. URL credentials are disabled
+by default; enable `_token=TOKEN` compatibility with `-allow-query-token`.
 Responses default to JSON. `Upstash-Encoding: base64` encodes strings.
 `Upstash-Response-Format: resp2` returns RESP2, except for transactions.
 
@@ -91,6 +92,7 @@ Enable Prometheus metrics with `-metrics`; scrape `GET /metrics`.
 | `REDIS_REST_TLS_KEY` | unset |
 | `REDIS_REST_LOG_LEVEL` | `info` |
 | `REDIS_REST_REDIS_INSECURE_SKIP_VERIFY` | `false` |
+| `REDIS_REST_ALLOW_QUERY_TOKEN` | `false` |
 
 Use `redis-rest-api -h` for timeouts and request limits.
 

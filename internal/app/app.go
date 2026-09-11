@@ -101,6 +101,7 @@ func Run(
 		WriteTimeout:     cfg.WriteTimeout,
 		ReadyCacheTTL:    cfg.ReadyCacheTTL,
 		Metrics:          cfg.Metrics,
+		AllowQueryToken:  cfg.AllowQueryToken,
 	})
 	server := newServer(ctx, &cfg, handler, logger)
 

@@ -226,16 +226,39 @@ func readBody(reader io.Reader, maxBody int64) ([]byte, error) {
 	return body, nil
 }
 
-func requestToken(request *http.Request) string {
+type queryAuth uint8
+
+const (
+	queryAuthDenied queryAuth = iota
+	queryAuthAllowed
+)
+
+type tokenSource uint8
+
+const (
+	tokenSourceNone tokenSource = iota
+	tokenSourceHeader
+	tokenSourceQuery
+)
+
+func requestToken(request *http.Request, queryMode queryAuth) (string, tokenSource) {
 	header := strings.TrimSpace(request.Header.Get("Authorization"))
 	if header != "" {
 		scheme, value, ok := strings.Cut(header, " ")
 		if !ok || !strings.EqualFold(scheme, "Bearer") {
-			return ""
+			return "", tokenSourceNone
 		}
 
-		return strings.TrimSpace(value)
+		return strings.TrimSpace(value), tokenSourceHeader
+	}
+	if queryMode != queryAuthAllowed {
+		return "", tokenSourceNone
 	}
 
-	return request.URL.Query().Get("_token")
+	value := request.URL.Query().Get("_token")
+	if value == "" {
+		return "", tokenSourceNone
+	}
+
+	return value, tokenSourceQuery
 }

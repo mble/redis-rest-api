@@ -14,10 +14,12 @@ import (
 )
 
 const (
-	headerEncoding = "Upstash-Encoding"
-	headerFormat   = "Upstash-Response-Format"
-	sseMediaType   = "text/event-stream"
-	mediaTypeParts = 2
+	headerEncoding      = "Upstash-Encoding"
+	headerFormat        = "Upstash-Response-Format"
+	bearerChallenge     = `Bearer realm="redis-rest-api"`
+	cachePrivateNoStore = "private, no-store"
+	sseMediaType        = "text/event-stream"
+	mediaTypeParts      = 2
 )
 
 var allowedMethods = map[string]struct{}{
@@ -48,6 +50,7 @@ type Handler struct {
 	writeTimeout  time.Duration
 	readiness     readyCache
 	metrics       metrics
+	queryAuth     queryAuth
 }
 
 type Options struct {
@@ -59,9 +62,15 @@ type Options struct {
 	WriteTimeout     time.Duration
 	ReadyCacheTTL    time.Duration
 	Metrics          bool
+	AllowQueryToken  bool
 }
 
 func New(service Service, logger *slog.Logger, options Options) *Handler {
+	queryMode := queryAuthDenied
+	if options.AllowQueryToken {
+		queryMode = queryAuthAllowed
+	}
+
 	return &Handler{
 		service:       service,
 		logger:        logger,
@@ -73,6 +82,7 @@ func New(service Service, logger *slog.Logger, options Options) *Handler {
 		writeTimeout:  options.WriteTimeout,
 		readiness:     readyCache{ttl: options.ReadyCacheTTL},
 		metrics:       metrics{enabled: options.Metrics},
+		queryAuth:     queryMode,
 	}
 }
 
@@ -224,7 +234,7 @@ func (h *Handler) command(writer http.ResponseWriter, request *http.Request) {
 	}
 
 	if options.format == formatRESP2 {
-		value, rawErr := h.service.ExecRaw(request.Context(), requestToken(request), command)
+		value, rawErr := h.service.ExecRaw(request.Context(), h.token(writer, request), command)
 		if rawErr != nil {
 			writeServiceError(writer, request, rawErr)
 
@@ -241,7 +251,7 @@ func (h *Handler) command(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	value, err := h.service.Exec(request.Context(), requestToken(request), command)
+	value, err := h.service.Exec(request.Context(), h.token(writer, request), command)
 	if err != nil {
 		writeServiceError(writer, request, err)
 
@@ -292,9 +302,9 @@ func (h *Handler) batch(writer http.ResponseWriter, request *http.Request, mode 
 
 	var replies []domain.Reply
 	if options.format == formatRESP2 {
-		replies, err = h.service.BatchRaw(request.Context(), requestToken(request), commands)
+		replies, err = h.service.BatchRaw(request.Context(), h.token(writer, request), commands)
 	} else {
-		replies, err = h.service.Batch(request.Context(), requestToken(request), commands, mode)
+		replies, err = h.service.Batch(request.Context(), h.token(writer, request), commands, mode)
 	}
 	if err != nil {
 		writeServiceError(writer, request, err)
@@ -370,7 +380,7 @@ func (h *Handler) subscribe(
 		channels[index] = channel
 	}
 
-	stream, err := h.service.Subscribe(request.Context(), requestToken(request), channels, mode)
+	stream, err := h.service.Subscribe(request.Context(), h.token(writer, request), channels, mode)
 	if err != nil {
 		writeServiceError(writer, request, err)
 
@@ -410,7 +420,7 @@ func (h *Handler) monitor(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	stream, err := h.service.Monitor(request.Context(), requestToken(request))
+	stream, err := h.service.Monitor(request.Context(), h.token(writer, request))
 	if err != nil {
 		writeServiceError(writer, request, err)
 
@@ -512,11 +522,21 @@ func writeServiceError(writer http.ResponseWriter, request *http.Request, err er
 	switch {
 	case errors.Is(err, domain.ErrUnauthorized):
 		status = http.StatusUnauthorized
+		writer.Header().Set("WWW-Authenticate", bearerChallenge)
 	case errors.Is(err, domain.ErrUnavailable):
 		status = http.StatusInternalServerError
 	}
 
 	writeError(writer, request, status, cleanError(err))
+}
+
+func (h *Handler) token(writer http.ResponseWriter, request *http.Request) string {
+	value, source := requestToken(request, h.queryAuth)
+	if source == tokenSourceQuery {
+		writer.Header().Set("Cache-Control", cachePrivateNoStore)
+	}
+
+	return value
 }
 
 func cleanError(err error) string {
