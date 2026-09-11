@@ -16,10 +16,13 @@ import (
 const (
 	testMaxTokenBytes     = 4096
 	testMaxTokenFileBytes = 1 << 20
+	testMinRawTokenBytes  = 32
+	testWriteToken        = "0123456789abcdef0123456789abcdef"
+	testReadToken         = "fedcba9876543210fedcba9876543210"
 )
 
 func TestRawTokens(t *testing.T) {
-	store, err := Load("", "write", "read")
+	store, err := Load("", testWriteToken, testReadToken)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,8 +32,8 @@ func TestRawTokens(t *testing.T) {
 		role  domain.Role
 		ok    bool
 	}{
-		{token: "write", role: domain.RoleReadWrite, ok: true},
-		{token: "read", role: domain.RoleReadOnly, ok: true},
+		{token: testWriteToken, role: domain.RoleReadWrite, ok: true},
+		{token: testReadToken, role: domain.RoleReadOnly, ok: true},
 		{token: "wrong", ok: false},
 		{token: "", ok: false},
 	}
@@ -138,7 +141,7 @@ func TestNoTokens(t *testing.T) {
 }
 
 func TestDuplicateTokens(t *testing.T) {
-	if _, err := Load("", "same", "same"); err == nil {
+	if _, err := Load("", testWriteToken, testWriteToken); err == nil {
 		t.Fatal("expected duplicate token error")
 	}
 }
@@ -147,6 +150,13 @@ func TestRejectsOversizedRawToken(t *testing.T) {
 	token := string(make([]byte, testMaxTokenBytes+1))
 	if _, err := Load("", token, ""); err == nil {
 		t.Fatal("expected oversized token error")
+	}
+}
+
+func TestRejectsShortRawToken(t *testing.T) {
+	token := string(make([]byte, testMinRawTokenBytes-1))
+	if _, err := Load("", token, ""); err == nil {
+		t.Fatal("expected weak token error")
 	}
 }
 

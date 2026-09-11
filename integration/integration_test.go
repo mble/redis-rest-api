@@ -21,8 +21,8 @@ import (
 
 const (
 	testRedisEnv = "TEST_REDIS_URL"
-	testToken    = "integration-token"
-	testReadOnly = "integration-read-token"
+	testToken    = "integration-token-0123456789abcdef"
+	testReadOnly = "integration-read-token-0123456789abcdef"
 	testBodyMax  = 1 << 20
 	streamWait   = 5 * time.Second
 )

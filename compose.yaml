@@ -3,8 +3,8 @@ services:
     build: .
     environment:
       REDIS_URL: redis://redis:6379
-      REDIS_REST_TOKEN: development-token
-      REDIS_REST_READ_ONLY_TOKEN: development-read-token
+      REDIS_REST_TOKEN: development-token-0123456789abcdef
+      REDIS_REST_READ_ONLY_TOKEN: development-read-token-0123456789abcdef
     ports:
       - "8081:8081"
     depends_on:

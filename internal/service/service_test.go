@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	writeToken = "write-token"
-	readToken  = "read-token"
+	writeToken = "write-token-for-tests-0123456789abcdef"
+	readToken  = "read-token-for-tests-0123456789abcdef"
 )
 
 type fakeStore struct {

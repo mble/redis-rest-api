@@ -18,6 +18,7 @@ import (
 const (
 	sha256HexLen      = sha256.Size * 2
 	defaultTokenKinds = 2
+	minRawTokenBytes  = 32
 	maxTokenBytes     = 4096
 	maxTokenFileBytes = 1 << 20
 	maxTokenEntries   = 10_000
@@ -131,6 +132,9 @@ func (s *Store) Reload() error {
 }
 
 func validateRaw(raw string) error {
+	if len(raw) < minRawTokenBytes {
+		return fmt.Errorf("must contain at least %d bytes", minRawTokenBytes)
+	}
 	if len(raw) > maxTokenBytes {
 		return fmt.Errorf("must not exceed %d bytes", maxTokenBytes)
 	}

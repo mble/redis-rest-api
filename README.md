@@ -14,15 +14,15 @@ backing server.
 docker compose up --build
 ```
 
-The development tokens are `development-token` and
-`development-read-token`.
+The development tokens are `development-token-0123456789abcdef` and
+`development-read-token-0123456789abcdef`.
 
 ```sh
 curl http://localhost:8081/set/foo/bar \
-  -H 'Authorization: Bearer development-token'
+  -H 'Authorization: Bearer development-token-0123456789abcdef'
 
 curl http://localhost:8081/get/foo \
-  -H 'Authorization: Bearer development-token'
+  -H 'Authorization: Bearer development-token-0123456789abcdef'
 ```
 
 ## API
@@ -127,6 +127,9 @@ make build
 
 The command creates a mode `0600` file and prints each secret once. Existing
 files are preserved unless `-force` is given.
+
+Raw environment tokens must contain at least 32 bytes. Send `SIGHUP` to reload
+the hashed token file; invalid replacements leave the active tokens unchanged.
 
 The file stores SHA-256 hashes:
 
