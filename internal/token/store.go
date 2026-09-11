@@ -2,7 +2,6 @@ package token
 
 import (
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -29,7 +28,7 @@ type entry struct {
 }
 
 type Store struct {
-	entries []entry
+	roles map[[sha256.Size]byte]domain.Role
 }
 
 func Load(path, standard, readOnly string) (*Store, error) {
@@ -73,7 +72,7 @@ func Load(path, standard, readOnly string) (*Store, error) {
 		roles[candidate.hash] = candidate.role
 	}
 
-	return &Store{entries: entries}, nil
+	return &Store{roles: roles}, nil
 }
 
 func (s *Store) Verify(raw string) (domain.Role, bool) {
@@ -82,19 +81,9 @@ func (s *Store) Verify(raw string) (domain.Role, bool) {
 	}
 
 	hash := sha256.Sum256([]byte(raw))
-	role := domain.RoleReadWrite
-	found := 0
+	role, found := s.roles[hash]
 
-	// Check every token so its position cannot leak through timing.
-	for _, candidate := range s.entries {
-		match := subtle.ConstantTimeCompare(hash[:], candidate.hash[:])
-		found |= match
-		if match == 1 {
-			role = candidate.role
-		}
-	}
-
-	return role, found == 1
+	return role, found
 }
 
 func validateRaw(raw string) error {
