@@ -193,6 +193,9 @@ func (c *Config) validate() error {
 	if c.RedisMinIdle < 0 || c.RedisPipePool < 0 {
 		return errors.New("redis pool counts cannot be negative")
 	}
+	if c.RedisMinIdle > maxPoolSize || c.RedisPipePool > maxPoolSize {
+		return fmt.Errorf("redis pool counts must not exceed %d", maxPoolSize)
+	}
 	if c.RedisPoolSize > 0 && c.RedisMinIdle > c.RedisPoolSize {
 		return errors.New("redis minimum idle connections exceed pool size")
 	}

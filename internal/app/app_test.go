@@ -101,3 +101,16 @@ func TestRedisPoolOptions(t *testing.T) {
 		t.Fatalf("unexpected pipeline pool: %#v", options)
 	}
 }
+
+func TestRedisAutoPoolRejectsExcessIdle(t *testing.T) {
+	cfg := config.Config{
+		RedisURI:     "redis://127.0.0.1:6379",
+		DialTimeout:  time.Second,
+		RedisTimeout: time.Second,
+		RedisMinIdle: maxPoolSize + 1,
+	}
+
+	if _, err := redisOptions(&cfg); err == nil {
+		t.Fatal("expected minimum idle validation error")
+	}
+}

@@ -135,6 +135,9 @@ func redisOptions(cfg *config.Config) (*redis.Options, error) {
 	if poolSize == 0 {
 		poolSize = min(poolPerProc*runtime.GOMAXPROCS(0), maxPoolSize)
 	}
+	if cfg.RedisMinIdle > poolSize {
+		return nil, errors.New("redis minimum idle connections exceed resolved pool size")
+	}
 
 	options.PoolFIFO = false
 	options.PoolSize = poolSize
