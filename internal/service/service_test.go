@@ -106,6 +106,9 @@ func TestExecPolicy(t *testing.T) {
 		{name: "unsupported connection", token: writeToken, command: domain.Command{"AUTH", "secret"}, wantError: "not supported"},
 		{name: "command exception", token: writeToken, command: domain.Command{"COMMAND"}},
 		{name: "unsafe server command", token: writeToken, command: domain.Command{"SHUTDOWN"}, wantError: "not supported"},
+		{name: "future admin command", token: writeToken, command: domain.Command{"FUTUREADMIN"}, wantError: "not supported"},
+		{name: "admin command", token: writeToken, command: domain.Command{"CONFIG", "GET", "*"}, wantError: "not supported"},
+		{name: "server inspection", token: writeToken, command: domain.Command{"INFO"}},
 		{name: "ping exception", token: readToken, command: domain.Command{"PING"}},
 		{name: "echo exception", token: readToken, command: domain.Command{"ECHO", "value"}},
 		{name: "unknown", token: writeToken, command: domain.Command{"NOPE"}, wantError: "not supported"},
@@ -190,15 +193,18 @@ func newTestService(t *testing.T, store domain.Store) *Service {
 	}
 
 	catalog := map[string]domain.CommandInfo{
-		"auth":     {},
-		"command":  {ACL: []string{"@connection"}},
-		"echo":     {ACL: []string{"@connection"}},
-		"get":      {ReadOnly: true},
-		"ping":     {ACL: []string{"@connection"}},
-		"scan":     {ReadOnly: true},
-		"set":      {ReadOnly: false},
-		"shutdown": {ACL: []string{"@dangerous"}},
-		"xread":    {ReadOnly: true, Flags: []string{"readonly", "blocking"}},
+		"auth":        {},
+		"command":     {ACL: []string{"@connection"}},
+		"config":      {ACL: []string{"@admin"}},
+		"echo":        {ACL: []string{"@connection"}},
+		"futureadmin": {ACL: []string{"@admin"}},
+		"get":         {ReadOnly: true},
+		"info":        {ReadOnly: true, ACL: []string{"@admin"}},
+		"ping":        {ACL: []string{"@connection"}},
+		"scan":        {ReadOnly: true},
+		"set":         {ReadOnly: false},
+		"shutdown":    {ACL: []string{"@dangerous"}},
+		"xread":       {ReadOnly: true, Flags: []string{"readonly", "blocking"}},
 	}
 
 	return New(store, tokens, catalog)

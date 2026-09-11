@@ -57,6 +57,17 @@ var readOnlyConnection = map[string]struct{}{
 	"ping": {},
 }
 
+// Permit read-oriented server inspection without exposing administration.
+var supportedAdmin = map[string]struct{}{
+	"command":  {},
+	"dbsize":   {},
+	"info":     {},
+	"lastsave": {},
+	"memory":   {},
+	"role":     {},
+	"time":     {},
+}
+
 // These commands control the backing Redis process, not REST data.
 var unsafeServer = map[string]struct{}{
 	"bgrewriteaof": {},
@@ -422,8 +433,14 @@ func unsupportedCategory(name string, categories []string) bool {
 			return true
 		case "@connection":
 			_, allowed := supportedConnection[name]
-
-			return !allowed
+			if !allowed {
+				return true
+			}
+		case "@admin":
+			_, allowed := supportedAdmin[name]
+			if !allowed {
+				return true
+			}
 		}
 	}
 
