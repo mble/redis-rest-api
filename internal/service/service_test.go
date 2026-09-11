@@ -124,7 +124,10 @@ func TestExecPolicy(t *testing.T) {
 			store := &fakeStore{}
 			service := newTestService(t, store)
 
-			_, err := service.Exec(t.Context(), test.token, test.command)
+			principal, err := service.Auth(test.token)
+			if err == nil {
+				_, err = service.Exec(t.Context(), principal, test.command)
+			}
 			if test.wantError == "" && err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -132,6 +135,17 @@ func TestExecPolicy(t *testing.T) {
 				t.Fatalf("expected error containing %q, got %v", test.wantError, err)
 			}
 		})
+	}
+}
+
+func TestAuthIdentity(t *testing.T) {
+	service := newTestService(t, &fakeStore{})
+	principal, err := service.Auth(writeToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if principal.ID != "standard" || principal.Role != domain.RoleReadWrite {
+		t.Fatalf("unexpected principal: %#v", principal)
 	}
 }
 
@@ -143,13 +157,14 @@ func TestPipelineSkipsRejectedCommands(t *testing.T) {
 		},
 	}
 	service := newTestService(t, store)
+	principal := mustAuth(t, service, writeToken)
 	commands := []domain.Command{
 		{"GET", "key"},
 		{"AUTH", "secret"},
 		{"SET", "key", "value"},
 	}
 
-	replies, err := service.Batch(t.Context(), writeToken, commands, domain.BatchPipeline)
+	replies, err := service.Batch(t.Context(), principal, commands, domain.BatchPipeline)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,12 +185,13 @@ func TestPipelineSkipsRejectedCommands(t *testing.T) {
 func TestTransactionRejectsBeforeRedis(t *testing.T) {
 	store := &fakeStore{}
 	service := newTestService(t, store)
+	principal := mustAuth(t, service, writeToken)
 	commands := []domain.Command{
 		{"SET", "key", "value"},
 		{"AUTH", "secret"},
 	}
 
-	_, err := service.Batch(t.Context(), writeToken, commands, domain.BatchTransaction)
+	_, err := service.Batch(t.Context(), principal, commands, domain.BatchTransaction)
 	if err == nil || !strings.Contains(err.Error(), "not supported") {
 		t.Fatalf("expected unsupported error, got %v", err)
 	}
@@ -208,4 +224,15 @@ func newTestService(t *testing.T, store domain.Store) *Service {
 	}
 
 	return New(store, tokens, catalog)
+}
+
+func mustAuth(t *testing.T, service *Service, raw string) domain.Principal {
+	t.Helper()
+
+	principal, err := service.Auth(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return principal
 }

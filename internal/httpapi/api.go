@@ -30,13 +30,14 @@ var allowedMethods = map[string]struct{}{
 }
 
 type Service interface {
-	Exec(context.Context, string, domain.Command) (any, error)
-	ExecRaw(context.Context, string, domain.Command) ([]byte, error)
-	Batch(context.Context, string, []domain.Command, domain.BatchMode) ([]domain.Reply, error)
-	BatchRaw(context.Context, string, []domain.Command) ([]domain.Reply, error)
+	Auth(string) (domain.Principal, error)
+	Exec(context.Context, domain.Principal, domain.Command) (any, error)
+	ExecRaw(context.Context, domain.Principal, domain.Command) ([]byte, error)
+	Batch(context.Context, domain.Principal, []domain.Command, domain.BatchMode) ([]domain.Reply, error)
+	BatchRaw(context.Context, domain.Principal, []domain.Command) ([]domain.Reply, error)
 	Ping(context.Context) error
-	Subscribe(context.Context, string, []string, domain.SubscriptionMode) (domain.Subscription, error)
-	Monitor(context.Context, string) (domain.Monitor, error)
+	Subscribe(context.Context, domain.Principal, []string, domain.SubscriptionMode) (domain.Subscription, error)
+	Monitor(context.Context, domain.Principal) (domain.Monitor, error)
 }
 
 type Handler struct {
@@ -219,6 +220,11 @@ func (h *Handler) command(writer http.ResponseWriter, request *http.Request) {
 	}
 	defer h.requests.release()
 
+	principal, ok := h.authenticate(writer, request)
+	if !ok {
+		return
+	}
+
 	options, err := parseOptions(request)
 	if err != nil {
 		writeError(writer, request, http.StatusBadRequest, err.Error())
@@ -234,7 +240,7 @@ func (h *Handler) command(writer http.ResponseWriter, request *http.Request) {
 	}
 
 	if options.format == formatRESP2 {
-		value, rawErr := h.service.ExecRaw(request.Context(), h.token(writer, request), command)
+		value, rawErr := h.service.ExecRaw(request.Context(), principal, command)
 		if rawErr != nil {
 			writeServiceError(writer, request, rawErr)
 
@@ -251,7 +257,7 @@ func (h *Handler) command(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	value, err := h.service.Exec(request.Context(), h.token(writer, request), command)
+	value, err := h.service.Exec(request.Context(), principal, command)
 	if err != nil {
 		writeServiceError(writer, request, err)
 
@@ -273,6 +279,11 @@ func (h *Handler) batch(writer http.ResponseWriter, request *http.Request, mode 
 		return
 	}
 	defer h.requests.release()
+
+	principal, ok := h.authenticate(writer, request)
+	if !ok {
+		return
+	}
 
 	if request.Method != http.MethodPost && request.Method != http.MethodPut {
 		writeError(writer, request, http.StatusBadRequest, "batch endpoint requires POST or PUT")
@@ -302,9 +313,9 @@ func (h *Handler) batch(writer http.ResponseWriter, request *http.Request, mode 
 
 	var replies []domain.Reply
 	if options.format == formatRESP2 {
-		replies, err = h.service.BatchRaw(request.Context(), h.token(writer, request), commands)
+		replies, err = h.service.BatchRaw(request.Context(), principal, commands)
 	} else {
-		replies, err = h.service.Batch(request.Context(), h.token(writer, request), commands, mode)
+		replies, err = h.service.Batch(request.Context(), principal, commands, mode)
 	}
 	if err != nil {
 		writeServiceError(writer, request, err)
@@ -349,6 +360,11 @@ func (h *Handler) subscribe(
 	}
 	defer h.subscriptions.release()
 
+	principal, ok := h.authenticate(writer, request)
+	if !ok {
+		return
+	}
+
 	if request.Method == http.MethodHead {
 		writeError(writer, request, http.StatusBadRequest, "subscription requires a response body")
 
@@ -380,7 +396,7 @@ func (h *Handler) subscribe(
 		channels[index] = channel
 	}
 
-	stream, err := h.service.Subscribe(request.Context(), h.token(writer, request), channels, mode)
+	stream, err := h.service.Subscribe(request.Context(), principal, channels, mode)
 	if err != nil {
 		writeServiceError(writer, request, err)
 
@@ -408,6 +424,11 @@ func (h *Handler) monitor(writer http.ResponseWriter, request *http.Request) {
 	}
 	defer h.monitors.release()
 
+	principal, ok := h.authenticate(writer, request)
+	if !ok {
+		return
+	}
+
 	if request.Method == http.MethodHead {
 		writeError(writer, request, http.StatusBadRequest, "monitor requires a response body")
 
@@ -420,7 +441,7 @@ func (h *Handler) monitor(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	stream, err := h.service.Monitor(request.Context(), h.token(writer, request))
+	stream, err := h.service.Monitor(request.Context(), principal)
 	if err != nil {
 		writeServiceError(writer, request, err)
 
@@ -530,13 +551,19 @@ func writeServiceError(writer http.ResponseWriter, request *http.Request, err er
 	writeError(writer, request, status, cleanError(err))
 }
 
-func (h *Handler) token(writer http.ResponseWriter, request *http.Request) string {
+func (h *Handler) authenticate(writer http.ResponseWriter, request *http.Request) (domain.Principal, bool) {
 	value, source := requestToken(request, h.queryAuth)
 	if source == tokenSourceQuery {
 		writer.Header().Set("Cache-Control", cachePrivateNoStore)
 	}
+	principal, err := h.service.Auth(value)
+	if err != nil {
+		writeServiceError(writer, request, err)
 
-	return value
+		return domain.Principal{}, false
+	}
+
+	return principal, true
 }
 
 func cleanError(err error) string {

@@ -54,6 +54,7 @@ type fakeService struct {
 	replies      []domain.Reply
 	rawReplies   []domain.Reply
 	err          error
+	authErr      error
 	pingErr      error
 	pingCalls    int
 	subscription domain.Subscription
@@ -61,15 +62,22 @@ type fakeService struct {
 	subMode      domain.SubscriptionMode
 }
 
-func (f *fakeService) Exec(_ context.Context, token string, command domain.Command) (any, error) {
+func (f *fakeService) Auth(token string) (domain.Principal, error) {
 	f.token = token
+	if f.authErr != nil {
+		return domain.Principal{}, f.authErr
+	}
+
+	return domain.Principal{ID: "test", Role: domain.RoleReadWrite}, nil
+}
+
+func (f *fakeService) Exec(_ context.Context, _ domain.Principal, command domain.Command) (any, error) {
 	f.command = command
 
 	return f.value, f.err
 }
 
-func (f *fakeService) ExecRaw(_ context.Context, token string, command domain.Command) ([]byte, error) {
-	f.token = token
+func (f *fakeService) ExecRaw(_ context.Context, _ domain.Principal, command domain.Command) ([]byte, error) {
 	f.command = command
 
 	return f.rawValue, f.err
@@ -77,11 +85,10 @@ func (f *fakeService) ExecRaw(_ context.Context, token string, command domain.Co
 
 func (f *fakeService) Batch(
 	_ context.Context,
-	token string,
+	_ domain.Principal,
 	commands []domain.Command,
 	mode domain.BatchMode,
 ) ([]domain.Reply, error) {
-	f.token = token
 	f.commands = commands
 	f.mode = mode
 
@@ -90,10 +97,9 @@ func (f *fakeService) Batch(
 
 func (f *fakeService) BatchRaw(
 	_ context.Context,
-	token string,
+	_ domain.Principal,
 	commands []domain.Command,
 ) ([]domain.Reply, error) {
-	f.token = token
 	f.commands = commands
 
 	return f.rawReplies, f.err
@@ -107,19 +113,16 @@ func (f *fakeService) Ping(context.Context) error {
 
 func (f *fakeService) Subscribe(
 	_ context.Context,
-	token string,
+	_ domain.Principal,
 	_ []string,
 	mode domain.SubscriptionMode,
 ) (domain.Subscription, error) {
-	f.token = token
 	f.subMode = mode
 
 	return f.subscription, f.err
 }
 
-func (f *fakeService) Monitor(_ context.Context, token string) (domain.Monitor, error) {
-	f.token = token
-
+func (f *fakeService) Monitor(_ context.Context, _ domain.Principal) (domain.Monitor, error) {
 	return f.monitor, f.err
 }
 
@@ -423,7 +426,7 @@ func TestBoundJSONMatchesEncoder(t *testing.T) {
 }
 
 func TestAuthenticationError(t *testing.T) {
-	service := &fakeService{err: domain.ErrUnauthorized}
+	service := &fakeService{authErr: domain.ErrUnauthorized}
 	request := httptest.NewRequest(http.MethodGet, "/get/key", http.NoBody)
 	response := serve(service, request)
 
@@ -432,6 +435,20 @@ func TestAuthenticationError(t *testing.T) {
 	}
 	if response.Header().Get("WWW-Authenticate") != `Bearer realm="redis-rest-api"` {
 		t.Fatalf("unexpected authentication challenge: %q", response.Header().Get("WWW-Authenticate"))
+	}
+}
+
+func TestAuthPrecedesBodyParsing(t *testing.T) {
+	service := &fakeService{authErr: domain.ErrUnauthorized}
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/",
+		strings.NewReader(strings.Repeat("x", testBodyLimit+1)),
+	)
+	response := serve(service, request)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("expected HTTP %d, got %d", http.StatusUnauthorized, response.Code)
 	}
 }
 
@@ -468,7 +485,7 @@ func TestMetrics(t *testing.T) {
 }
 
 func TestAuthMetrics(t *testing.T) {
-	handler := newTestHandler(&fakeService{err: domain.ErrUnauthorized}, testBodyLimit)
+	handler := newTestHandler(&fakeService{authErr: domain.ErrUnauthorized}, testBodyLimit)
 	request := httptest.NewRequest(http.MethodGet, "/get/key", http.NoBody)
 	handler.ServeHTTP(httptest.NewRecorder(), request)
 

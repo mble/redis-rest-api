@@ -103,26 +103,25 @@ func New(store domain.Store, auth authenticator, catalog map[string]domain.Comma
 	}
 }
 
-func (s *Service) Exec(ctx context.Context, rawToken string, cmd domain.Command) (any, error) {
-	role, err := s.role(rawToken)
-	if err != nil {
-		return nil, err
+func (s *Service) Auth(rawToken string) (domain.Principal, error) {
+	principal, ok := s.auth.Verify(rawToken)
+	if !ok {
+		return domain.Principal{}, domain.ErrUnauthorized
 	}
 
-	if allowErr := s.allow(role, cmd); allowErr != nil {
+	return principal, nil
+}
+
+func (s *Service) Exec(ctx context.Context, principal domain.Principal, cmd domain.Command) (any, error) {
+	if allowErr := s.allow(principal.Role, cmd); allowErr != nil {
 		return nil, allowErr
 	}
 
 	return s.store.Exec(ctx, cmd)
 }
 
-func (s *Service) ExecRaw(ctx context.Context, rawToken string, cmd domain.Command) ([]byte, error) {
-	role, err := s.role(rawToken)
-	if err != nil {
-		return nil, err
-	}
-
-	if allowErr := s.allow(role, cmd); allowErr != nil {
+func (s *Service) ExecRaw(ctx context.Context, principal domain.Principal, cmd domain.Command) ([]byte, error) {
+	if allowErr := s.allow(principal.Role, cmd); allowErr != nil {
 		return nil, allowErr
 	}
 
@@ -131,36 +130,26 @@ func (s *Service) ExecRaw(ctx context.Context, rawToken string, cmd domain.Comma
 
 func (s *Service) Batch(
 	ctx context.Context,
-	rawToken string,
+	principal domain.Principal,
 	commands []domain.Command,
 	mode domain.BatchMode,
 ) ([]domain.Reply, error) {
-	role, err := s.role(rawToken)
-	if err != nil {
-		return nil, err
-	}
-
 	if len(commands) == 0 {
 		return nil, fmt.Errorf("%w: command list is empty", domain.ErrInvalid)
 	}
 
 	if mode == domain.BatchTransaction {
-		return s.transaction(ctx, role, commands)
+		return s.transaction(ctx, principal.Role, commands)
 	}
 
-	return s.pipeline(ctx, role, commands)
+	return s.pipeline(ctx, principal.Role, commands)
 }
 
 func (s *Service) BatchRaw(
 	ctx context.Context,
-	rawToken string,
+	principal domain.Principal,
 	commands []domain.Command,
 ) ([]domain.Reply, error) {
-	role, err := s.role(rawToken)
-	if err != nil {
-		return nil, err
-	}
-
 	if len(commands) == 0 {
 		return nil, fmt.Errorf("%w: command list is empty", domain.ErrInvalid)
 	}
@@ -170,7 +159,7 @@ func (s *Service) BatchRaw(
 	indices := make([]int, 0, len(commands))
 
 	for index, cmd := range commands {
-		if allowErr := s.allow(role, cmd); allowErr != nil {
+		if allowErr := s.allow(principal.Role, cmd); allowErr != nil {
 			replies[index].Err = allowErr
 			continue
 		}
@@ -205,15 +194,10 @@ func (s *Service) Ping(ctx context.Context) error {
 
 func (s *Service) Subscribe(
 	ctx context.Context,
-	rawToken string,
+	principal domain.Principal,
 	channels []string,
 	mode domain.SubscriptionMode,
 ) (domain.Subscription, error) {
-	role, err := s.role(rawToken)
-	if err != nil {
-		return nil, err
-	}
-
 	if len(channels) == 0 {
 		return nil, fmt.Errorf("%w: SUBSCRIBE requires a channel", domain.ErrInvalid)
 	}
@@ -223,24 +207,19 @@ func (s *Service) Subscribe(
 		return nil, err
 	}
 
-	if _, err := s.require(role, name); err != nil {
+	if _, err := s.require(principal.Role, name); err != nil {
 		return nil, err
 	}
 
 	return s.store.Subscribe(ctx, channels, mode)
 }
 
-func (s *Service) Monitor(ctx context.Context, rawToken string) (domain.Monitor, error) {
-	role, err := s.role(rawToken)
-	if err != nil {
-		return nil, err
-	}
-
-	if role != domain.RoleReadWrite {
+func (s *Service) Monitor(ctx context.Context, principal domain.Principal) (domain.Monitor, error) {
+	if principal.Role != domain.RoleReadWrite {
 		return nil, permissionError(monitorName)
 	}
 
-	if _, err := s.require(role, monitorName); err != nil {
+	if _, err := s.require(principal.Role, monitorName); err != nil {
 		return nil, err
 	}
 
@@ -298,15 +277,6 @@ func (s *Service) transaction(
 	}
 
 	return s.store.Batch(ctx, commands, domain.BatchTransaction)
-}
-
-func (s *Service) role(rawToken string) (domain.Role, error) {
-	principal, ok := s.auth.Verify(rawToken)
-	if !ok {
-		return 0, domain.ErrUnauthorized
-	}
-
-	return principal.Role, nil
 }
 
 func (s *Service) allow(role domain.Role, cmd domain.Command) error {
