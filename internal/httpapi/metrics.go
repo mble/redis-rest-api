@@ -28,7 +28,9 @@ func (m *metrics) start() {
 func (m *metrics) finish(status int, duration time.Duration) {
 	m.active.Add(-1)
 	m.completed.Add(1)
-	m.durationNS.Add(uint64(duration))
+	if duration > 0 {
+		m.durationNS.Add(uint64(duration))
+	}
 
 	class := status / 100
 	if class < 1 || class >= metricStatusClasses {

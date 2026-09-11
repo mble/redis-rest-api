@@ -183,7 +183,22 @@ func (c *Config) validate() error {
 	if c.MaxResponse < 1 || c.MaxResponse > maxResponseLimit {
 		return fmt.Errorf("max response must be between 1 and %d bytes", maxResponseLimit)
 	}
+	if err := c.validateRedis(); err != nil {
+		return err
+	}
+	if err := c.validateHTTP(); err != nil {
+		return err
+	}
 
+	switch c.LogLevel {
+	case "debug", "info", "warn", "error":
+		return nil
+	default:
+		return fmt.Errorf("invalid log level %q", c.LogLevel)
+	}
+}
+
+func (c *Config) validateRedis() error {
 	if c.DialTimeout <= 0 || c.RedisTimeout <= 0 {
 		return errors.New("redis timeouts must be positive")
 	}
@@ -206,6 +221,10 @@ func (c *Config) validate() error {
 		return errors.New("redis pipeline buffer and pool size must be set together")
 	}
 
+	return nil
+}
+
+func (c *Config) validateHTTP() error {
 	if c.ReadHeaderTimeout <= 0 || c.ReadTimeout <= 0 || c.WriteTimeout <= 0 || c.IdleTimeout <= 0 || c.ShutdownTimeout <= 0 {
 		return errors.New("HTTP timeouts must be positive")
 	}
@@ -225,12 +244,7 @@ func (c *Config) validate() error {
 		return fmt.Errorf("maximum monitors must be between 0 and %d", maxConcurrency)
 	}
 
-	switch c.LogLevel {
-	case "debug", "info", "warn", "error":
-		return nil
-	default:
-		return fmt.Errorf("invalid log level %q", c.LogLevel)
-	}
+	return nil
 }
 
 func envOr(getenv Getter, key, fallback string) string {

@@ -107,60 +107,22 @@ func (b *responseBudget) use(size int) error {
 
 func normalizeValue(value any, encoding stringEncoding, budget *responseBudget, depth int) (any, error) {
 	if depth > maxResponseDepth {
-		return nil, errors.New("Redis response nesting is too deep")
+		return nil, errors.New("redis response nesting is too deep")
 	}
 
 	switch typed := value.(type) {
 	case nil:
-		if err := budget.use(len("null")); err != nil {
-			return nil, err
-		}
-
-		return nil, nil
+		return keepValue(nil, len("null"), budget)
 	case string:
-		if encoding == encodingBase64 && typed != "OK" {
-			if err := budget.use(base64.StdEncoding.EncodedLen(len(typed))); err != nil {
-				return nil, err
-			}
-
-			return base64.StdEncoding.EncodeToString([]byte(typed)), nil
-		}
-		if err := budget.use(len(typed)); err != nil {
-			return nil, err
-		}
-
-		return typed, nil
+		return normalizeString(typed, encoding, budget)
 	case []byte:
-		if encoding == encodingBase64 {
-			if err := budget.use(base64.StdEncoding.EncodedLen(len(typed))); err != nil {
-				return nil, err
-			}
-
-			return base64.StdEncoding.EncodeToString(typed), nil
-		}
-		if err := budget.use(len(typed)); err != nil {
-			return nil, err
-		}
-
-		return string(typed), nil
+		return normalizeBytes(typed, encoding, budget)
 	case int, int8, int16, int32, int64:
-		if err := budget.use(encodedNumberBytes); err != nil {
-			return nil, err
-		}
-
-		return typed, nil
+		return keepValue(typed, encodedNumberBytes, budget)
 	case uint, uint8, uint16, uint32, uint64:
-		if err := budget.use(encodedNumberBytes); err != nil {
-			return nil, err
-		}
-
-		return typed, nil
+		return keepValue(typed, encodedNumberBytes, budget)
 	case float32, float64, bool:
-		if err := budget.use(encodedNumberBytes); err != nil {
-			return nil, err
-		}
-
-		return typed, nil
+		return keepValue(typed, encodedNumberBytes, budget)
 	case []string:
 		return normalizeStrings(typed, encoding, budget, depth+1)
 	case []any:
@@ -184,6 +146,44 @@ func normalizeValue(value any, encoding stringEncoding, budget *responseBudget, 
 	default:
 		return nil, fmt.Errorf("unsupported Redis response type %T", value)
 	}
+}
+
+func normalizeString(value string, encoding stringEncoding, budget *responseBudget) (any, error) {
+	if encoding != encodingBase64 || value == "OK" {
+		return keepValue(value, len(value), budget)
+	}
+
+	size := base64.StdEncoding.EncodedLen(len(value))
+	if err := budget.use(size); err != nil {
+		return nil, err
+	}
+
+	return base64.StdEncoding.EncodeToString([]byte(value)), nil
+}
+
+func normalizeBytes(value []byte, encoding stringEncoding, budget *responseBudget) (any, error) {
+	if encoding != encodingBase64 {
+		if err := budget.use(len(value)); err != nil {
+			return nil, err
+		}
+
+		return string(value), nil
+	}
+
+	size := base64.StdEncoding.EncodedLen(len(value))
+	if err := budget.use(size); err != nil {
+		return nil, err
+	}
+
+	return base64.StdEncoding.EncodeToString(value), nil
+}
+
+func keepValue(value any, size int, budget *responseBudget) (any, error) {
+	if err := budget.use(size); err != nil {
+		return nil, err
+	}
+
+	return value, nil
 }
 
 func normalizeStrings(

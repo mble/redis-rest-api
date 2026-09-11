@@ -125,8 +125,8 @@ func benchmarkStore(b *testing.B, size int) *Store {
 		b.Fatal(err)
 	}
 	path := filepath.Join(b.TempDir(), "tokens.json")
-	if err := os.WriteFile(path, body, 0o600); err != nil {
-		b.Fatal(err)
+	if writeErr := os.WriteFile(path, body, 0o600); writeErr != nil {
+		b.Fatal(writeErr)
 	}
 
 	store, err := Load(path, "", "")
