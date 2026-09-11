@@ -17,6 +17,10 @@ integration:
 	test -n "$(TEST_REDIS_URL)"
 	go test -race -v ./integration
 
+.PHONY: bench
+bench:
+	go test -run '^$$' -bench . -benchmem ./internal/httpapi ./internal/token
+
 .PHONY: vet
 vet:
 	go vet ./...

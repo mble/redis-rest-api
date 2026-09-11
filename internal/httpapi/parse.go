@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -116,7 +115,7 @@ func decodeCommand(reader io.Reader, maxBody int64) (domain.Command, error) {
 }
 
 func parseCommands(reader io.Reader, maxBody int64) ([]domain.Command, error) {
-	var raw []any
+	var raw [][]any
 	if err := decodeJSON(reader, maxBody, &raw); err != nil {
 		return nil, err
 	}
@@ -130,9 +129,8 @@ func parseCommands(reader io.Reader, maxBody int64) ([]domain.Command, error) {
 	}
 
 	commands := make([]domain.Command, len(raw))
-	for index, value := range raw {
-		array, ok := value.([]any)
-		if !ok {
+	for index, array := range raw {
+		if array == nil {
 			return nil, fmt.Errorf("%w: command %d must be an array", domain.ErrInvalid, index)
 		}
 
@@ -148,21 +146,24 @@ func parseCommands(reader io.Reader, maxBody int64) ([]domain.Command, error) {
 }
 
 func decodeJSON(reader io.Reader, maxBody int64, target any) error {
-	body, err := readBody(reader, maxBody)
-	if err != nil {
-		return err
-	}
-
-	decoder := json.NewDecoder(bytes.NewReader(body))
+	limited := &io.LimitedReader{R: reader, N: maxBody + 1}
+	decoder := json.NewDecoder(limited)
 	decoder.UseNumber()
 
 	if err := decoder.Decode(target); err != nil {
+		if limited.N == 0 {
+			return fmt.Errorf("%w: request body exceeds %d bytes", domain.ErrInvalid, maxBody)
+		}
+
 		return fmt.Errorf("%w: invalid JSON: %w", domain.ErrInvalid, err)
 	}
 
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		return fmt.Errorf("%w: request body must contain one JSON value", domain.ErrInvalid)
+	}
+	if limited.N == 0 {
+		return fmt.Errorf("%w: request body exceeds %d bytes", domain.ErrInvalid, maxBody)
 	}
 
 	return nil
@@ -173,7 +174,7 @@ func normalizeCommand(raw []any) (domain.Command, error) {
 		return nil, fmt.Errorf("%w: command is empty", domain.ErrInvalid)
 	}
 
-	command := make(domain.Command, len(raw))
+	command := domain.Command(raw)
 	for index, value := range raw {
 		normalized, err := normalizeArg(value)
 		if err != nil {
