@@ -85,6 +85,7 @@ func Run(
 		MaxSubscriptions: cfg.MaxSubscriptions,
 		MaxMonitors:      cfg.MaxMonitors,
 		WriteTimeout:     cfg.WriteTimeout,
+		ReadyCacheTTL:    cfg.ReadyCacheTTL,
 	})
 	server := newServer(ctx, &cfg, handler, logger)
 

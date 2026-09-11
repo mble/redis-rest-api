@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mble/redis-rest-api/internal/domain"
@@ -45,6 +46,7 @@ type Handler struct {
 	subscriptions limiter
 	monitors      limiter
 	writeTimeout  time.Duration
+	readiness     readyCache
 }
 
 type Options struct {
@@ -54,6 +56,7 @@ type Options struct {
 	MaxSubscriptions int
 	MaxMonitors      int
 	WriteTimeout     time.Duration
+	ReadyCacheTTL    time.Duration
 }
 
 func New(service Service, logger *slog.Logger, options Options) *Handler {
@@ -66,10 +69,33 @@ func New(service Service, logger *slog.Logger, options Options) *Handler {
 		subscriptions: newLimiter(options.MaxSubscriptions),
 		monitors:      newLimiter(options.MaxMonitors),
 		writeTimeout:  options.WriteTimeout,
+		readiness:     readyCache{ttl: options.ReadyCacheTTL},
 	}
 }
 
 type limiter chan struct{}
+
+type readyCache struct {
+	mu    sync.Mutex
+	ttl   time.Duration
+	until time.Time
+	err   error
+}
+
+func (c *readyCache) ping(ctx context.Context, service Service) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	now := time.Now()
+	if now.Before(c.until) {
+		return c.err
+	}
+
+	c.err = service.Ping(ctx)
+	c.until = time.Now().Add(c.ttl)
+
+	return c.err
+}
 
 func newLimiter(size int) limiter {
 	return make(limiter, size)
@@ -143,7 +169,7 @@ func (h *Handler) ready(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	if err := h.service.Ping(request.Context()); err != nil {
+	if err := h.readiness.ping(request.Context(), h.service); err != nil {
 		writeServiceError(writer, request, err)
 
 		return

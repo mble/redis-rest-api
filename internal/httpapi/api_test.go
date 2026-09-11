@@ -23,6 +23,7 @@ const (
 	testMaxSubscriptions = 4
 	testMaxMonitors      = 1
 	testWriteTimeout     = time.Second
+	testReadyCacheTTL    = time.Second
 )
 
 func TestLimiterRejectsExcess(t *testing.T) {
@@ -52,6 +53,7 @@ type fakeService struct {
 	rawReplies   []domain.Reply
 	err          error
 	pingErr      error
+	pingCalls    int
 	subscription domain.Subscription
 	monitor      domain.Monitor
 	subMode      domain.SubscriptionMode
@@ -96,6 +98,8 @@ func (f *fakeService) BatchRaw(
 }
 
 func (f *fakeService) Ping(context.Context) error {
+	f.pingCalls++
+
 	return f.pingErr
 }
 
@@ -380,6 +384,23 @@ func TestHealth(t *testing.T) {
 	}
 }
 
+func TestReadinessCachesRedisPing(t *testing.T) {
+	service := &fakeService{}
+	handler := newTestHandler(service, testBodyLimit)
+	for range 2 {
+		request := httptest.NewRequest(http.MethodGet, "/readyz", http.NoBody)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("expected HTTP %d, got %d", http.StatusOK, response.Code)
+		}
+	}
+
+	if service.pingCalls != 1 {
+		t.Fatalf("expected one Redis ping, got %d", service.pingCalls)
+	}
+}
+
 func TestSubscribeSSE(t *testing.T) {
 	events := make(chan domain.Event, 1)
 	events <- domain.Event{Kind: "message", Channel: "chat", Payload: "hello"}
@@ -521,15 +542,21 @@ func serve(service Service, request *http.Request) *httptest.ResponseRecorder {
 
 func serveWithLimit(service Service, request *http.Request, limit int64) *httptest.ResponseRecorder {
 	response := httptest.NewRecorder()
+	newTestHandler(service, limit).ServeHTTP(response, request)
+
+	return response
+}
+
+func newTestHandler(service Service, limit int64) *Handler {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	New(service, logger, Options{
+
+	return New(service, logger, Options{
 		MaxBody:          limit,
 		MaxResponse:      testResponseLimit,
 		MaxInFlight:      testMaxInFlight,
 		MaxSubscriptions: testMaxSubscriptions,
 		MaxMonitors:      testMaxMonitors,
 		WriteTimeout:     testWriteTimeout,
-	}).ServeHTTP(response, request)
-
-	return response
+		ReadyCacheTTL:    testReadyCacheTTL,
+	})
 }

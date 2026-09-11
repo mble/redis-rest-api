@@ -23,6 +23,7 @@ const (
 	defaultWriteTimeout           = 10 * time.Second
 	defaultIdleTimeout            = 60 * time.Second
 	defaultShutdownTimeout        = 10 * time.Second
+	defaultReadyCacheTTL          = time.Second
 	defaultMaxHeaderBytes         = 32 << 10
 	defaultMaxInFlight            = 256
 	defaultMaxSubscriptions       = 128
@@ -31,6 +32,7 @@ const (
 	maxPoolSize                   = 4096
 	maxRedisBuffer                = 1 << 20
 	maxHeaderBytes                = 1 << 20
+	maxReadyCacheTTL              = time.Minute
 )
 
 const (
@@ -69,6 +71,7 @@ type Config struct {
 	WriteTimeout      time.Duration
 	IdleTimeout       time.Duration
 	ShutdownTimeout   time.Duration
+	ReadyCacheTTL     time.Duration
 	MaxHeaderBytes    int
 	MaxInFlight       int
 	MaxSubscriptions  int
@@ -101,6 +104,7 @@ func Parse(args []string, getenv Getter, output io.Writer) (Config, error) {
 	flags.DurationVar(&config.WriteTimeout, "write-timeout", config.WriteTimeout, "HTTP response write timeout")
 	flags.DurationVar(&config.IdleTimeout, "idle-timeout", config.IdleTimeout, "HTTP idle timeout")
 	flags.DurationVar(&config.ShutdownTimeout, "shutdown-timeout", config.ShutdownTimeout, "graceful shutdown timeout")
+	flags.DurationVar(&config.ReadyCacheTTL, "ready-cache-ttl", config.ReadyCacheTTL, "Redis readiness cache duration")
 	flags.IntVar(&config.MaxHeaderBytes, "max-header-bytes", config.MaxHeaderBytes, "maximum HTTP request header size")
 	flags.IntVar(&config.MaxInFlight, "max-in-flight", config.MaxInFlight, "maximum concurrent command requests")
 	flags.IntVar(&config.MaxSubscriptions, "max-subscriptions", config.MaxSubscriptions, "maximum subscription streams")
@@ -149,6 +153,7 @@ func defaults(getenv Getter) Config {
 		WriteTimeout:      defaultWriteTimeout,
 		IdleTimeout:       defaultIdleTimeout,
 		ShutdownTimeout:   defaultShutdownTimeout,
+		ReadyCacheTTL:     defaultReadyCacheTTL,
 		MaxHeaderBytes:    defaultMaxHeaderBytes,
 		MaxInFlight:       defaultMaxInFlight,
 		MaxSubscriptions:  defaultMaxSubscriptions,
@@ -198,6 +203,9 @@ func (c *Config) validate() error {
 
 	if c.ReadHeaderTimeout <= 0 || c.ReadTimeout <= 0 || c.WriteTimeout <= 0 || c.IdleTimeout <= 0 || c.ShutdownTimeout <= 0 {
 		return errors.New("HTTP timeouts must be positive")
+	}
+	if c.ReadyCacheTTL <= 0 || c.ReadyCacheTTL > maxReadyCacheTTL {
+		return fmt.Errorf("ready cache TTL must be between 1ns and %s", maxReadyCacheTTL)
 	}
 	if c.MaxHeaderBytes < 1 || c.MaxHeaderBytes > maxHeaderBytes {
 		return fmt.Errorf("max header must be between 1 and %d bytes", maxHeaderBytes)
