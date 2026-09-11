@@ -40,6 +40,7 @@ type Handler struct {
 	service       Service
 	logger        *slog.Logger
 	maxBody       int64
+	maxResponse   int64
 	requests      limiter
 	subscriptions limiter
 	monitors      limiter
@@ -48,6 +49,7 @@ type Handler struct {
 
 type Options struct {
 	MaxBody          int64
+	MaxResponse      int64
 	MaxInFlight      int
 	MaxSubscriptions int
 	MaxMonitors      int
@@ -59,6 +61,7 @@ func New(service Service, logger *slog.Logger, options Options) *Handler {
 		service:       service,
 		logger:        logger,
 		maxBody:       options.MaxBody,
+		maxResponse:   options.MaxResponse,
 		requests:      newLimiter(options.MaxInFlight),
 		subscriptions: newLimiter(options.MaxSubscriptions),
 		monitors:      newLimiter(options.MaxMonitors),
@@ -125,7 +128,7 @@ func (h *Handler) live(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	writeJSON(writer, request, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(writer, request, http.StatusOK, statusResponse{Status: "ok"})
 }
 
 func (h *Handler) ready(writer http.ResponseWriter, request *http.Request) {
@@ -146,7 +149,7 @@ func (h *Handler) ready(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	writeJSON(writer, request, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(writer, request, http.StatusOK, statusResponse{Status: "ok"})
 }
 
 func (h *Handler) command(writer http.ResponseWriter, request *http.Request) {
@@ -182,7 +185,7 @@ func (h *Handler) command(writer http.ResponseWriter, request *http.Request) {
 			status = http.StatusBadRequest
 		}
 
-		writeRawRESP2(writer, request, status, []domain.Reply{{Value: value}})
+		writeRawRESP2(writer, request, status, []domain.Reply{{Value: value}}, h.maxResponse)
 
 		return
 	}
@@ -194,14 +197,14 @@ func (h *Handler) command(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	value, err = normalize(value, options.encoding)
+	value, err = normalize(value, options.encoding, h.maxResponse)
 	if err != nil {
-		writeError(writer, request, http.StatusInternalServerError, err.Error())
+		writeEncodeError(writer, request, err)
 
 		return
 	}
 
-	writeJSON(writer, request, http.StatusOK, map[string]any{"result": value})
+	writeBoundJSON(writer, request, http.StatusOK, resultResponse{Result: value}, h.maxResponse)
 }
 
 func (h *Handler) batch(writer http.ResponseWriter, request *http.Request, mode domain.BatchMode) {
@@ -249,29 +252,30 @@ func (h *Handler) batch(writer http.ResponseWriter, request *http.Request, mode 
 	}
 
 	if options.format == formatRESP2 {
-		writeRawRESP2(writer, request, http.StatusOK, replies)
+		writeRawRESP2(writer, request, http.StatusOK, replies, h.maxResponse)
 
 		return
 	}
 
-	response := make([]map[string]any, len(replies))
+	response := make([]any, len(replies))
+	budget := responseBudget{remaining: h.maxResponse}
 	for index, reply := range replies {
 		if reply.Err != nil {
-			response[index] = map[string]any{"error": cleanError(reply.Err)}
+			response[index] = errorResponse{Error: cleanError(reply.Err)}
 			continue
 		}
 
-		value, normalizeErr := normalize(reply.Value, options.encoding)
+		value, normalizeErr := normalizeBudget(reply.Value, options.encoding, &budget)
 		if normalizeErr != nil {
-			writeError(writer, request, http.StatusInternalServerError, normalizeErr.Error())
+			writeEncodeError(writer, request, normalizeErr)
 
 			return
 		}
 
-		response[index] = map[string]any{"result": value}
+		response[index] = resultResponse{Result: value}
 	}
 
-	writeJSON(writer, request, http.StatusOK, response)
+	writeBoundJSON(writer, request, http.StatusOK, response, h.maxResponse)
 }
 
 func (h *Handler) subscribe(

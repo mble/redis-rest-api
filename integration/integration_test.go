@@ -281,6 +281,7 @@ func newStack(t *testing.T) (*redisdb.Client, http.Handler) {
 
 	return store, httpapi.New(apiService, logger, httpapi.Options{
 		MaxBody:          testBodyMax,
+		MaxResponse:      16 << 20,
 		MaxInFlight:      32,
 		MaxSubscriptions: 8,
 		MaxMonitors:      1,

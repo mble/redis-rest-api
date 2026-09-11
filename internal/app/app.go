@@ -80,6 +80,7 @@ func Run(
 	apiService := service.New(store, tokens, catalog)
 	handler := httpapi.New(apiService, logger, httpapi.Options{
 		MaxBody:          cfg.MaxBody,
+		MaxResponse:      cfg.MaxResponse,
 		MaxInFlight:      cfg.MaxInFlight,
 		MaxSubscriptions: cfg.MaxSubscriptions,
 		MaxMonitors:      cfg.MaxMonitors,

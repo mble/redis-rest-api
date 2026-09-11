@@ -15,6 +15,8 @@ const (
 	defaultTokenFile              = "redis-users.json" // #nosec G101 -- This is a path, not a credential.
 	defaultMaxBody          int64 = 1 << 20
 	maxBodyLimit            int64 = 64 << 20
+	defaultMaxResponse      int64 = 16 << 20
+	maxResponseLimit        int64 = 512 << 20
 	defaultRedisTimeout           = 2 * time.Second
 	defaultHeaderTimeout          = 5 * time.Second
 	defaultReadTimeout            = 10 * time.Second
@@ -55,6 +57,7 @@ type Config struct {
 	TLSKeyFile        string
 	LogLevel          string
 	MaxBody           int64
+	MaxResponse       int64
 	DialTimeout       time.Duration
 	RedisTimeout      time.Duration
 	RedisPoolSize     int
@@ -86,6 +89,7 @@ func Parse(args []string, getenv Getter, output io.Writer) (Config, error) {
 	flags.StringVar(&config.TLSKeyFile, "tls-key", config.TLSKeyFile, "HTTP TLS private key")
 	flags.StringVar(&config.LogLevel, "log-level", config.LogLevel, "debug, info, warn, or error")
 	flags.Int64Var(&config.MaxBody, "max-body-bytes", config.MaxBody, "maximum request body")
+	flags.Int64Var(&config.MaxResponse, "max-response-bytes", config.MaxResponse, "maximum HTTP response body")
 	flags.DurationVar(&config.DialTimeout, "redis-dial-timeout", config.DialTimeout, "Redis dial timeout")
 	flags.DurationVar(&config.RedisTimeout, "redis-timeout", config.RedisTimeout, "Redis read and write timeout")
 	flags.IntVar(&config.RedisPoolSize, "redis-pool-size", config.RedisPoolSize, "Redis connection pool size; zero selects automatically")
@@ -137,6 +141,7 @@ func defaults(getenv Getter) Config {
 		TLSKeyFile:        getenv(envTLSKey),
 		LogLevel:          envOr(getenv, envLogLevel, "info"),
 		MaxBody:           defaultMaxBody,
+		MaxResponse:       defaultMaxResponse,
 		DialTimeout:       defaultRedisTimeout,
 		RedisTimeout:      defaultRedisTimeout,
 		ReadHeaderTimeout: defaultHeaderTimeout,
@@ -167,6 +172,9 @@ func (c *Config) validate() error {
 
 	if c.MaxBody < 1 || c.MaxBody > maxBodyLimit {
 		return fmt.Errorf("max body must be between 1 and %d bytes", maxBodyLimit)
+	}
+	if c.MaxResponse < 1 || c.MaxResponse > maxResponseLimit {
+		return fmt.Errorf("max response must be between 1 and %d bytes", maxResponseLimit)
 	}
 
 	if c.DialTimeout <= 0 || c.RedisTimeout <= 0 {

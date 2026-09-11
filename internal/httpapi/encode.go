@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -34,6 +33,26 @@ type responseOptions struct {
 	encoding stringEncoding
 }
 
+type resultResponse struct {
+	Result any `json:"result"`
+}
+
+type errorResponse struct {
+	Error string `json:"error"`
+}
+
+type statusResponse struct {
+	Status string `json:"status"`
+}
+
+const (
+	maxResponseDepth    = 128
+	encodedNumberBytes  = 32
+	respErrorFrameBytes = len("-\r\n")
+)
+
+var errResponseLimit = errors.New("response exceeds maximum size")
+
 func parseOptions(request *http.Request) (responseOptions, error) {
 	options := responseOptions{}
 
@@ -62,41 +81,98 @@ func parseOptions(request *http.Request) (responseOptions, error) {
 	return options, nil
 }
 
-func normalize(value any, encoding stringEncoding) (any, error) {
+func normalize(value any, encoding stringEncoding, limit int64) (any, error) {
+	budget := responseBudget{remaining: limit}
+
+	return normalizeBudget(value, encoding, &budget)
+}
+
+func normalizeBudget(value any, encoding stringEncoding, budget *responseBudget) (any, error) {
+	return normalizeValue(value, encoding, budget, 0)
+}
+
+type responseBudget struct {
+	remaining int64
+}
+
+func (b *responseBudget) use(size int) error {
+	if size < 0 || int64(size) > b.remaining {
+		return errResponseLimit
+	}
+
+	b.remaining -= int64(size)
+
+	return nil
+}
+
+func normalizeValue(value any, encoding stringEncoding, budget *responseBudget, depth int) (any, error) {
+	if depth > maxResponseDepth {
+		return nil, errors.New("Redis response nesting is too deep")
+	}
+
 	switch typed := value.(type) {
 	case nil:
+		if err := budget.use(len("null")); err != nil {
+			return nil, err
+		}
+
 		return nil, nil
 	case string:
 		if encoding == encodingBase64 && typed != "OK" {
+			if err := budget.use(base64.StdEncoding.EncodedLen(len(typed))); err != nil {
+				return nil, err
+			}
+
 			return base64.StdEncoding.EncodeToString([]byte(typed)), nil
+		}
+		if err := budget.use(len(typed)); err != nil {
+			return nil, err
 		}
 
 		return typed, nil
 	case []byte:
 		if encoding == encodingBase64 {
+			if err := budget.use(base64.StdEncoding.EncodedLen(len(typed))); err != nil {
+				return nil, err
+			}
+
 			return base64.StdEncoding.EncodeToString(typed), nil
+		}
+		if err := budget.use(len(typed)); err != nil {
+			return nil, err
 		}
 
 		return string(typed), nil
 	case int, int8, int16, int32, int64:
-		return typed, nil
-	case uint, uint8, uint16, uint32, uint64:
-		return typed, nil
-	case float32, float64, bool:
-		return typed, nil
-	case []string:
-		values := make([]any, len(typed))
-		for index, item := range typed {
-			values[index] = item
+		if err := budget.use(encodedNumberBytes); err != nil {
+			return nil, err
 		}
 
-		return normalizeSlice(values, encoding)
+		return typed, nil
+	case uint, uint8, uint16, uint32, uint64:
+		if err := budget.use(encodedNumberBytes); err != nil {
+			return nil, err
+		}
+
+		return typed, nil
+	case float32, float64, bool:
+		if err := budget.use(encodedNumberBytes); err != nil {
+			return nil, err
+		}
+
+		return typed, nil
+	case []string:
+		return normalizeStrings(typed, encoding, budget, depth+1)
 	case []any:
-		return normalizeSlice(typed, encoding)
+		return normalizeSlice(typed, encoding, budget, depth+1)
 	case map[string]any:
 		values := make(map[string]any, len(typed))
 		for key, item := range typed {
-			normalized, err := normalize(item, encoding)
+			if err := budget.use(len(key)); err != nil {
+				return nil, err
+			}
+
+			normalized, err := normalizeValue(item, encoding, budget, depth+1)
 			if err != nil {
 				return nil, err
 			}
@@ -110,10 +186,34 @@ func normalize(value any, encoding stringEncoding) (any, error) {
 	}
 }
 
-func normalizeSlice(values []any, encoding stringEncoding) ([]any, error) {
+func normalizeStrings(
+	values []string,
+	encoding stringEncoding,
+	budget *responseBudget,
+	depth int,
+) ([]any, error) {
 	normalized := make([]any, len(values))
 	for index, value := range values {
-		item, err := normalize(value, encoding)
+		item, err := normalizeValue(value, encoding, budget, depth)
+		if err != nil {
+			return nil, err
+		}
+
+		normalized[index] = item
+	}
+
+	return normalized, nil
+}
+
+func normalizeSlice(
+	values []any,
+	encoding stringEncoding,
+	budget *responseBudget,
+	depth int,
+) ([]any, error) {
+	normalized := make([]any, len(values))
+	for index, value := range values {
+		item, err := normalizeValue(value, encoding, budget, depth)
 		if err != nil {
 			return nil, err
 		}
@@ -131,7 +231,39 @@ func writeJSON(writer http.ResponseWriter, request *http.Request, status int, va
 		body = []byte(`{"error":"encode response"}`)
 	}
 
-	writer.Header().Set("Content-Type", "application/json")
+	writeBody(writer, request, status, "application/json", body)
+}
+
+func writeBoundJSON(
+	writer http.ResponseWriter,
+	request *http.Request,
+	status int,
+	value any,
+	limit int64,
+) {
+	body, err := json.Marshal(value)
+	if err != nil {
+		writeError(writer, request, http.StatusInternalServerError, "encode response")
+
+		return
+	}
+	if int64(len(body)) > limit {
+		writeError(writer, request, http.StatusBadGateway, errResponseLimit.Error())
+
+		return
+	}
+
+	writeBody(writer, request, status, "application/json", body)
+}
+
+func writeBody(
+	writer http.ResponseWriter,
+	request *http.Request,
+	status int,
+	contentType string,
+	body []byte,
+) {
+	writer.Header().Set("Content-Type", contentType)
 	writer.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	writer.WriteHeader(status)
 
@@ -143,39 +275,73 @@ func writeJSON(writer http.ResponseWriter, request *http.Request, status int, va
 }
 
 func writeError(writer http.ResponseWriter, request *http.Request, status int, message string) {
-	writeJSON(writer, request, status, map[string]string{"error": message})
+	writeJSON(writer, request, status, errorResponse{Error: message})
 }
 
-func writeRawRESP2(writer http.ResponseWriter, request *http.Request, status int, replies []domain.Reply) {
-	var body bytes.Buffer
+func writeRawRESP2(
+	writer http.ResponseWriter,
+	request *http.Request,
+	status int,
+	replies []domain.Reply,
+	limit int64,
+) {
+	size, err := rawSize(replies, limit)
+	if err != nil {
+		writeEncodeError(writer, request, err)
 
-	for _, reply := range replies {
-		if reply.Err != nil {
-			body.WriteByte('-')
-			body.WriteString(respError(cleanError(reply.Err)))
-			body.WriteString("\r\n")
-			continue
-		}
-
-		raw, ok := reply.Value.([]byte)
-		if !ok {
-			writeError(writer, request, http.StatusInternalServerError, "invalid raw Redis response")
-
-			return
-		}
-
-		body.Write(raw)
+		return
 	}
 
 	writer.Header().Set("Content-Type", "application/octet-stream")
-	writer.Header().Set("Content-Length", strconv.Itoa(body.Len()))
+	writer.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 	writer.WriteHeader(status)
 
 	if request.Method == http.MethodHead {
 		return
 	}
 
-	_, _ = writer.Write(body.Bytes())
+	for _, reply := range replies {
+		if reply.Err != nil {
+			_, _ = fmt.Fprintf(writer, "-%s\r\n", respError(cleanError(reply.Err)))
+			continue
+		}
+
+		raw, _ := reply.Value.([]byte)
+		_, _ = writer.Write(raw)
+	}
+}
+
+func rawSize(replies []domain.Reply, limit int64) (int64, error) {
+	budget := responseBudget{remaining: limit}
+	for _, reply := range replies {
+		if reply.Err != nil {
+			size := len(respError(cleanError(reply.Err))) + respErrorFrameBytes
+			if err := budget.use(size); err != nil {
+				return 0, err
+			}
+
+			continue
+		}
+
+		raw, ok := reply.Value.([]byte)
+		if !ok {
+			return 0, errors.New("invalid raw Redis response")
+		}
+		if err := budget.use(len(raw)); err != nil {
+			return 0, err
+		}
+	}
+
+	return limit - budget.remaining, nil
+}
+
+func writeEncodeError(writer http.ResponseWriter, request *http.Request, err error) {
+	status := http.StatusInternalServerError
+	if errors.Is(err, errResponseLimit) {
+		status = http.StatusBadGateway
+	}
+
+	writeError(writer, request, status, err.Error())
 }
 
 func respError(message string) string {

@@ -16,6 +16,7 @@ import (
 )
 
 const testBodyLimit = 1024
+const testResponseLimit = 1024
 
 const (
 	testMaxInFlight      = 8
@@ -333,6 +334,27 @@ func TestBodyLimit(t *testing.T) {
 	}
 }
 
+func TestJSONResponseLimit(t *testing.T) {
+	service := &fakeService{value: strings.Repeat("x", testResponseLimit+1)}
+	request := httptest.NewRequest(http.MethodGet, "/get/key", http.NoBody)
+	response := serve(service, request)
+
+	if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), "exceeds") {
+		t.Fatalf("expected response limit error, got HTTP %d with %s", response.Code, response.Body.String())
+	}
+}
+
+func TestRESP2ResponseLimit(t *testing.T) {
+	service := &fakeService{rawValue: make([]byte, testResponseLimit+1)}
+	request := httptest.NewRequest(http.MethodGet, "/get/key", http.NoBody)
+	request.Header.Set(headerFormat, "resp2")
+	response := serve(service, request)
+
+	if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), "exceeds") {
+		t.Fatalf("expected response limit error, got HTTP %d with %s", response.Code, response.Body.String())
+	}
+}
+
 func TestAuthenticationError(t *testing.T) {
 	service := &fakeService{err: domain.ErrUnauthorized}
 	request := httptest.NewRequest(http.MethodGet, "/get/key", http.NoBody)
@@ -502,6 +524,7 @@ func serveWithLimit(service Service, request *http.Request, limit int64) *httpte
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	New(service, logger, Options{
 		MaxBody:          limit,
+		MaxResponse:      testResponseLimit,
 		MaxInFlight:      testMaxInFlight,
 		MaxSubscriptions: testMaxSubscriptions,
 		MaxMonitors:      testMaxMonitors,

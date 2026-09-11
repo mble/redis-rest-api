@@ -70,6 +70,7 @@ func TestInvalidConfig(t *testing.T) {
 	tests := [][]string{
 		{"-tls-cert", "cert.pem"},
 		{"-max-body-bytes", "0"},
+		{"-max-response-bytes", "0"},
 		{"-redis-timeout", "0s"},
 		{"-redis-pool-size", "4097"},
 		{"-redis-pool-size", "2", "-redis-min-idle", "3"},
