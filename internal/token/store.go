@@ -15,6 +15,7 @@ import (
 const (
 	sha256HexLen      = sha256.Size * 2
 	defaultTokenKinds = 2
+	maxTokenBytes     = 4096
 )
 
 type diskEntry struct {
@@ -44,10 +45,18 @@ func Load(path, standard, readOnly string) (*Store, error) {
 	}
 
 	if standard != "" {
+		if err := validateRaw(standard); err != nil {
+			return nil, fmt.Errorf("standard token: %w", err)
+		}
+
 		entries = append(entries, makeEntry(domain.RoleReadWrite, standard))
 	}
 
 	if readOnly != "" {
+		if err := validateRaw(readOnly); err != nil {
+			return nil, fmt.Errorf("read-only token: %w", err)
+		}
+
 		entries = append(entries, makeEntry(domain.RoleReadOnly, readOnly))
 	}
 
@@ -68,6 +77,10 @@ func Load(path, standard, readOnly string) (*Store, error) {
 }
 
 func (s *Store) Verify(raw string) (domain.Role, bool) {
+	if len(raw) > maxTokenBytes {
+		return 0, false
+	}
+
 	hash := sha256.Sum256([]byte(raw))
 	role := domain.RoleReadWrite
 	found := 0
@@ -82,6 +95,14 @@ func (s *Store) Verify(raw string) (domain.Role, bool) {
 	}
 
 	return role, found == 1
+}
+
+func validateRaw(raw string) error {
+	if len(raw) > maxTokenBytes {
+		return fmt.Errorf("must not exceed %d bytes", maxTokenBytes)
+	}
+
+	return nil
 }
 
 func loadFile(path string) ([]entry, error) {

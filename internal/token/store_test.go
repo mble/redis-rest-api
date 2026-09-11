@@ -10,6 +10,8 @@ import (
 	"github.com/mble/redis-rest-api/internal/domain"
 )
 
+const testMaxTokenBytes = 4096
+
 func TestRawTokens(t *testing.T) {
 	store, err := Load("", "write", "read")
 	if err != nil {
@@ -82,5 +84,12 @@ func TestNoTokens(t *testing.T) {
 func TestDuplicateTokens(t *testing.T) {
 	if _, err := Load("", "same", "same"); err == nil {
 		t.Fatal("expected duplicate token error")
+	}
+}
+
+func TestRejectsOversizedRawToken(t *testing.T) {
+	token := string(make([]byte, testMaxTokenBytes+1))
+	if _, err := Load("", token, ""); err == nil {
+		t.Fatal("expected oversized token error")
 	}
 }
