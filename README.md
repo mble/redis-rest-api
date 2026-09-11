@@ -76,6 +76,8 @@ GET /livez
 GET /readyz
 ```
 
+Enable Prometheus metrics with `-metrics`; scrape `GET /metrics`.
+
 ## Configuration
 
 | Environment | Default |
@@ -91,6 +93,23 @@ GET /readyz
 | `REDIS_REST_REDIS_INSECURE_SKIP_VERIFY` | `false` |
 
 Use `redis-rest-api -h` for timeouts and request limits.
+
+Key limits default to:
+
+| Flag | Default |
+|---|---:|
+| `-max-body-bytes` | 1 MiB |
+| `-max-response-bytes` | 16 MiB |
+| `-max-header-bytes` | 32 KiB |
+| `-max-in-flight` | 256 |
+| `-max-subscriptions` | 128 |
+| `-max-monitors` | 1 |
+| `-ready-cache-ttl` | 1s |
+| `-write-timeout` | 10s |
+
+The Redis pool defaults to ten connections per `GOMAXPROCS`, capped at 1024.
+Use `-redis-pool-size`, `-redis-min-idle`, and the pipeline buffer flags to
+tune measured workloads.
 
 `REDIS_URL` supports Redis URI credentials, database selection, and `rediss`.
 Terminate public TLS at a reverse proxy or provide both HTTP TLS files.
@@ -139,8 +158,8 @@ HTTP adapter -> service/auth policy -> Redis adapter -> Redis/Valkey
 ```
 
 Each request carries its cancellation context through every layer. Request
-bodies, batch sizes, command arguments, headers, connection pools, and shutdown
-duration are bounded.
+bodies, responses, batch sizes, command arguments, headers, concurrency,
+connection pools, stream writes, and shutdown duration are bounded.
 
 ## Develop
 
@@ -150,6 +169,7 @@ Requires Go 1.26 or newer.
 make test
 make vet
 make lint
+make bench
 
 TEST_REDIS_URL=redis://127.0.0.1:6379 make integration
 ```
