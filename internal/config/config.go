@@ -10,18 +10,22 @@ import (
 )
 
 const (
-	defaultListenAddr            = ":8081"
-	defaultRedisURI              = "redis://127.0.0.1:6379"
-	defaultTokenFile             = "redis-users.json" // #nosec G101 -- This is a path, not a credential.
-	defaultMaxBody         int64 = 1 << 20
-	maxBodyLimit           int64 = 64 << 20
-	defaultRedisTimeout          = 2 * time.Second
-	defaultHeaderTimeout         = 5 * time.Second
-	defaultReadTimeout           = 10 * time.Second
-	defaultIdleTimeout           = 60 * time.Second
-	defaultShutdownTimeout       = 10 * time.Second
-	maxPoolSize                  = 4096
-	maxRedisBuffer               = 1 << 20
+	defaultListenAddr             = ":8081"
+	defaultRedisURI               = "redis://127.0.0.1:6379"
+	defaultTokenFile              = "redis-users.json" // #nosec G101 -- This is a path, not a credential.
+	defaultMaxBody          int64 = 1 << 20
+	maxBodyLimit            int64 = 64 << 20
+	defaultRedisTimeout           = 2 * time.Second
+	defaultHeaderTimeout          = 5 * time.Second
+	defaultReadTimeout            = 10 * time.Second
+	defaultIdleTimeout            = 60 * time.Second
+	defaultShutdownTimeout        = 10 * time.Second
+	defaultMaxInFlight            = 256
+	defaultMaxSubscriptions       = 128
+	defaultMaxMonitors            = 1
+	maxConcurrency                = 65536
+	maxPoolSize                   = 4096
+	maxRedisBuffer                = 1 << 20
 )
 
 const (
@@ -58,6 +62,9 @@ type Config struct {
 	ReadTimeout       time.Duration
 	IdleTimeout       time.Duration
 	ShutdownTimeout   time.Duration
+	MaxInFlight       int
+	MaxSubscriptions  int
+	MaxMonitors       int
 	RedisSkipVerify   bool
 	ShowVersion       bool
 }
@@ -84,6 +91,9 @@ func Parse(args []string, getenv Getter, output io.Writer) (Config, error) {
 	flags.DurationVar(&config.ReadTimeout, "read-timeout", config.ReadTimeout, "HTTP request read timeout")
 	flags.DurationVar(&config.IdleTimeout, "idle-timeout", config.IdleTimeout, "HTTP idle timeout")
 	flags.DurationVar(&config.ShutdownTimeout, "shutdown-timeout", config.ShutdownTimeout, "graceful shutdown timeout")
+	flags.IntVar(&config.MaxInFlight, "max-in-flight", config.MaxInFlight, "maximum concurrent command requests")
+	flags.IntVar(&config.MaxSubscriptions, "max-subscriptions", config.MaxSubscriptions, "maximum subscription streams")
+	flags.IntVar(&config.MaxMonitors, "max-monitors", config.MaxMonitors, "maximum monitor streams; zero disables")
 	flags.BoolVar(&config.RedisSkipVerify, "redis-insecure-skip-verify", config.RedisSkipVerify, "skip Redis TLS verification")
 	flags.BoolVar(&config.ShowVersion, "version", false, "print version")
 
@@ -126,6 +136,9 @@ func defaults(getenv Getter) Config {
 		ReadTimeout:       defaultReadTimeout,
 		IdleTimeout:       defaultIdleTimeout,
 		ShutdownTimeout:   defaultShutdownTimeout,
+		MaxInFlight:       defaultMaxInFlight,
+		MaxSubscriptions:  defaultMaxSubscriptions,
+		MaxMonitors:       defaultMaxMonitors,
 		RedisSkipVerify:   envBool(getenv(envSkipVerify)),
 	}
 }
@@ -168,6 +181,15 @@ func (c *Config) validate() error {
 
 	if c.ReadHeaderTimeout <= 0 || c.ReadTimeout <= 0 || c.IdleTimeout <= 0 || c.ShutdownTimeout <= 0 {
 		return errors.New("HTTP timeouts must be positive")
+	}
+	if c.MaxInFlight < 1 || c.MaxInFlight > maxConcurrency {
+		return fmt.Errorf("maximum in-flight requests must be between 1 and %d", maxConcurrency)
+	}
+	if c.MaxSubscriptions < 0 || c.MaxSubscriptions > maxConcurrency {
+		return fmt.Errorf("maximum subscriptions must be between 0 and %d", maxConcurrency)
+	}
+	if c.MaxMonitors < 0 || c.MaxMonitors > maxConcurrency {
+		return fmt.Errorf("maximum monitors must be between 0 and %d", maxConcurrency)
 	}
 
 	switch c.LogLevel {

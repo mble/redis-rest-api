@@ -16,6 +16,28 @@ import (
 
 const testBodyLimit = 1024
 
+const (
+	testMaxInFlight      = 8
+	testMaxSubscriptions = 4
+	testMaxMonitors      = 1
+)
+
+func TestLimiterRejectsExcess(t *testing.T) {
+	limiter := newLimiter(1)
+	if !limiter.acquire() {
+		t.Fatal("expected first admission")
+	}
+	if limiter.acquire() {
+		t.Fatal("expected excess rejection")
+	}
+
+	limiter.release()
+	if !limiter.acquire() {
+		t.Fatal("expected admission after release")
+	}
+	limiter.release()
+}
+
 type fakeService struct {
 	token        string
 	command      domain.Command
@@ -451,7 +473,12 @@ func serve(service Service, request *http.Request) *httptest.ResponseRecorder {
 func serveWithLimit(service Service, request *http.Request, limit int64) *httptest.ResponseRecorder {
 	response := httptest.NewRecorder()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	New(service, logger, limit).ServeHTTP(response, request)
+	New(service, logger, Options{
+		MaxBody:          limit,
+		MaxInFlight:      testMaxInFlight,
+		MaxSubscriptions: testMaxSubscriptions,
+		MaxMonitors:      testMaxMonitors,
+	}).ServeHTTP(response, request)
 
 	return response
 }

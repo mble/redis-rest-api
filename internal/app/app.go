@@ -79,7 +79,12 @@ func Run(
 	}
 
 	apiService := service.New(store, tokens, catalog)
-	handler := httpapi.New(apiService, logger, cfg.MaxBody)
+	handler := httpapi.New(apiService, logger, httpapi.Options{
+		MaxBody:          cfg.MaxBody,
+		MaxInFlight:      cfg.MaxInFlight,
+		MaxSubscriptions: cfg.MaxSubscriptions,
+		MaxMonitors:      cfg.MaxMonitors,
+	})
 	server := newServer(ctx, &cfg, handler, logger)
 
 	listener, err := net.Listen("tcp", cfg.ListenAddr)

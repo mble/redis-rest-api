@@ -279,7 +279,12 @@ func newStack(t *testing.T) (*redisdb.Client, http.Handler) {
 	apiService := service.New(store, tokens, catalog)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	return store, httpapi.New(apiService, logger, testBodyMax)
+	return store, httpapi.New(apiService, logger, httpapi.Options{
+		MaxBody:          testBodyMax,
+		MaxInFlight:      32,
+		MaxSubscriptions: 8,
+		MaxMonitors:      1,
+	})
 }
 
 func runBatch(handler http.Handler, path, body string) *httptest.ResponseRecorder {

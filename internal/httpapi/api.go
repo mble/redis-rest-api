@@ -36,17 +36,49 @@ type Service interface {
 }
 
 type Handler struct {
-	service Service
-	logger  *slog.Logger
-	maxBody int64
+	service       Service
+	logger        *slog.Logger
+	maxBody       int64
+	requests      limiter
+	subscriptions limiter
+	monitors      limiter
 }
 
-func New(service Service, logger *slog.Logger, maxBody int64) *Handler {
+type Options struct {
+	MaxBody          int64
+	MaxInFlight      int
+	MaxSubscriptions int
+	MaxMonitors      int
+}
+
+func New(service Service, logger *slog.Logger, options Options) *Handler {
 	return &Handler{
-		service: service,
-		logger:  logger,
-		maxBody: maxBody,
+		service:       service,
+		logger:        logger,
+		maxBody:       options.MaxBody,
+		requests:      newLimiter(options.MaxInFlight),
+		subscriptions: newLimiter(options.MaxSubscriptions),
+		monitors:      newLimiter(options.MaxMonitors),
 	}
+}
+
+type limiter chan struct{}
+
+func newLimiter(size int) limiter {
+	return make(limiter, size)
+}
+
+func (l limiter) acquire() bool {
+	select {
+	case l <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (l limiter) release() {
+	<-l
 }
 
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -93,6 +125,11 @@ func (h *Handler) live(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (h *Handler) ready(writer http.ResponseWriter, request *http.Request) {
+	if !h.admit(writer, request, h.requests, "request") {
+		return
+	}
+	defer h.requests.release()
+
 	if request.Method != http.MethodGet && request.Method != http.MethodHead {
 		writeError(writer, request, http.StatusBadRequest, "health endpoint requires GET or HEAD")
 
@@ -109,6 +146,11 @@ func (h *Handler) ready(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (h *Handler) command(writer http.ResponseWriter, request *http.Request) {
+	if !h.admit(writer, request, h.requests, "request") {
+		return
+	}
+	defer h.requests.release()
+
 	options, err := parseOptions(request)
 	if err != nil {
 		writeError(writer, request, http.StatusBadRequest, err.Error())
@@ -159,6 +201,11 @@ func (h *Handler) command(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (h *Handler) batch(writer http.ResponseWriter, request *http.Request, mode domain.BatchMode) {
+	if !h.admit(writer, request, h.requests, "request") {
+		return
+	}
+	defer h.requests.release()
+
 	if request.Method != http.MethodPost && request.Method != http.MethodPut {
 		writeError(writer, request, http.StatusBadRequest, "batch endpoint requires POST or PUT")
 
@@ -228,6 +275,11 @@ func (h *Handler) subscribe(
 	request *http.Request,
 	mode domain.SubscriptionMode,
 ) {
+	if !h.admit(writer, request, h.subscriptions, "subscription") {
+		return
+	}
+	defer h.subscriptions.release()
+
 	if request.Method == http.MethodHead {
 		writeError(writer, request, http.StatusBadRequest, "subscription requires a response body")
 
@@ -284,6 +336,11 @@ func (h *Handler) subscribe(
 }
 
 func (h *Handler) monitor(writer http.ResponseWriter, request *http.Request) {
+	if !h.admit(writer, request, h.monitors, "monitor") {
+		return
+	}
+	defer h.monitors.release()
+
 	if request.Method == http.MethodHead {
 		writeError(writer, request, http.StatusBadRequest, "monitor requires a response body")
 
@@ -322,6 +379,21 @@ func (h *Handler) monitor(writer http.ResponseWriter, request *http.Request) {
 	flusher.Flush()
 
 	h.writeMonitor(writer, flusher, request, stream)
+}
+
+func (h *Handler) admit(
+	writer http.ResponseWriter,
+	request *http.Request,
+	limit limiter,
+	resource string,
+) bool {
+	if limit.acquire() {
+		return true
+	}
+
+	writeError(writer, request, http.StatusTooManyRequests, resource+" capacity exceeded")
+
+	return false
 }
 
 func (h *Handler) writeEvents(
