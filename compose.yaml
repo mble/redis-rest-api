@@ -1,0 +1,26 @@
+services:
+  api:
+    build: .
+    environment:
+      REDIS_URL: redis://redis:6379
+      REDIS_REST_TOKEN: development-token
+      REDIS_REST_READ_ONLY_TOKEN: development-read-token
+    ports:
+      - "8081:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 20

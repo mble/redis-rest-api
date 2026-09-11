@@ -1,0 +1,7 @@
+.git
+.github
+bin
+coverage.out
+redis-users.json
+*.pem
+*.prof
