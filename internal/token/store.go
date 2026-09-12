@@ -147,7 +147,9 @@ func loadFile(path string) ([]entry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read token file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	raw, err := io.ReadAll(io.LimitReader(file, maxTokenFileBytes+1))
 	if err != nil {

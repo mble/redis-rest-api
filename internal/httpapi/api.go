@@ -16,7 +16,7 @@ import (
 const (
 	headerEncoding      = "Upstash-Encoding"
 	headerFormat        = "Upstash-Response-Format"
-	bearerChallenge     = `Bearer realm="redis-rest-api"`
+	bearerChallenge     = `Bearer realm="redis-rest-api"` // #nosec G101 -- This is a challenge, not a credential.
 	cachePrivateNoStore = "private, no-store"
 	sseMediaType        = "text/event-stream"
 	mediaTypeParts      = 2
