@@ -55,8 +55,9 @@ const (
 )
 
 const (
-	jsonResultPrefix = `{"result":`
-	jsonErrorPrefix  = `{"error":`
+	jsonResultPrefix    = `{"result":`
+	jsonErrorPrefix     = `{"error":`
+	jsonReplacementRune = `\ufffd`
 )
 
 var errResponseLimit = errors.New("response exceeds maximum size")
@@ -427,7 +428,7 @@ func appendJSONString(value string, buffer *jsonBuffer) error {
 
 		runeValue, decodedSize := utf8.DecodeRuneInString(value[index:])
 		if runeValue == utf8.RuneError && decodedSize == 1 {
-			if err := buffer.write("\ufffd"); err != nil {
+			if err := buffer.write(jsonReplacementRune); err != nil {
 				return err
 			}
 

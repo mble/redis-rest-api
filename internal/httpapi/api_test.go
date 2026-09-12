@@ -396,7 +396,6 @@ func TestBoundJSONMatchesEncoder(t *testing.T) {
 	values := []any{
 		resultResponse{Result: nil},
 		resultResponse{Result: "\x00\n<>énez\u2028"},
-		resultResponse{Result: string([]byte{0xff, 0xfe})},
 		resultResponse{Result: int64(-9223372036854775807)},
 		resultResponse{Result: uint64(18446744073709551615)},
 		resultResponse{Result: 1e-9},
@@ -422,6 +421,18 @@ func TestBoundJSONMatchesEncoder(t *testing.T) {
 		if _, err := marshalBoundJSON(value, int64(len(body)-1)); !errors.Is(err, errResponseLimit) {
 			t.Fatalf("expected limit error for %#v, got %v", value, err)
 		}
+	}
+}
+
+func TestBoundJSONReplacesInvalidUTF8(t *testing.T) {
+	value := resultResponse{Result: string([]byte{0xff, 0xfe})}
+	want := []byte(`{"result":"\ufffd\ufffd"}`)
+	body, err := marshalBoundJSON(value, int64(len(want)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(body, want) {
+		t.Fatalf("expected %q, got %q", want, body)
 	}
 }
 
